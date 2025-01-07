@@ -1,186 +1,181 @@
 <!-- DANSWER_METADATA={"link": "https://github.com/onyx-dot-app/onyx/blob/main/CONTRIBUTING.md"} -->
 
-# Contributing to Onyx
+# 为 Onyx 做贡献
 
-Hey there! We are so excited that you're interested in Onyx.
+嘿！我们很高兴你对 Onyx 感兴趣。
 
-As an open source project in a rapidly changing space, we welcome all contributions.
+作为一个快速发展领域中的开源项目，我们欢迎所有形式的贡献。
 
-## 💃 Guidelines
+## 💃 指南
 
-### Contribution Opportunities
+### 贡献机会
 
-The [GitHub Issues](https://github.com/onyx-dot-app/onyx/issues) page is a great place to start for contribution ideas.
+[GitHub Issues](https://github.com/onyx-dot-app/onyx/issues) 页面是寻找贡献想法的好地方。
 
-Issues that have been explicitly approved by the maintainers (aligned with the direction of the project)
-will be marked with the `approved by maintainers` label.
-Issues marked `good first issue` are an especially great place to start.
+已经被维护者明确批准的 issues（与项目方向一致的）将会标记为 `approved by maintainers` 标签。
+标记为 `good first issue` 的 issues 是特别适合新手入门的。
 
-**Connectors** to other tools are another great place to contribute. For details on how, refer to this
-[README.md](https://github.com/onyx-dot-app/onyx/blob/main/backend/onyx/connectors/README.md).
+**连接器**是另一个很好的贡献切入点。详情请参考这个
+[README.md](https://github.com/onyx-dot-app/onyx/blob/main/backend/onyx/connectors/README.md)。
 
-If you have a new/different contribution in mind, we'd love to hear about it!
-Your input is vital to making sure that Onyx moves in the right direction.
-Before starting on implementation, please raise a GitHub issue.
+如果你有新的/不同的贡献想法，我们很乐意听取！
+你的意见对确保 Onyx 朝着正确的方向发展至关重要。
+在开始实施之前，请先提出一个 GitHub issue。
 
-And always feel free to message us (Chris Weaver / Yuhong Sun) on
-[Slack](https://join.slack.com/t/danswer/shared_invite/zt-1w76msxmd-HJHLe3KNFIAIzk_0dSOKaQ) /
-[Discord](https://discord.gg/TDJ59cGV2X) directly about anything at all.
+随时欢迎通过 [Slack](https://join.slack.com/t/danswer/shared_invite/zt-1w76msxmd-HJHLe3KNFIAIzk_0dSOKaQ) 或
+[Discord](https://discord.gg/TDJ59cGV2X) 直接联系我们（Chris Weaver / Yuhong Sun）讨论任何问题。
 
-### Contributing Code
+### 贡献代码
 
-To contribute to this project, please follow the
-["fork and pull request"](https://docs.github.com/en/get-started/quickstart/contributing-to-projects) workflow.
-When opening a pull request, mention related issues and feel free to tag relevant maintainers.
+要为此项目贡献代码，请遵循["fork and pull request"](https://docs.github.com/en/get-started/quickstart/contributing-to-projects)工作流程。
+在开启 pull request 时，请提及相关的 issues 并随时标记相关的维护者。
 
-Before creating a pull request please make sure that the new changes conform to the formatting and linting requirements.
-See the [Formatting and Linting](#formatting-and-linting) section for how to run these checks locally.
+在创建 pull request 之前，请确保新的更改符合格式化和代码检查要求。
+有关如何在本地运行这些检查的说明，请参见[格式化和代码检查](#formatting-and-linting)部分。
 
-### Getting Help 🙋
+### 获取帮助 🙋
 
-Our goal is to make contributing as easy as possible. If you run into any issues please don't hesitate to reach out.
-That way we can help future contributors and users can avoid the same issue.
+我们的目标是让贡献变得尽可能容易。如果你遇到任何问题，请不要犹豫，尽管联系我们。
+这样我们就可以帮助未来的贡献者和用户避免同样的问题。
 
-We also have support channels and generally interesting discussions on our
-[Slack](https://join.slack.com/t/danswer/shared_invite/zt-1w76msxmd-HJHLe3KNFIAIzk_0dSOKaQ)
-and
-[Discord](https://discord.gg/TDJ59cGV2X).
+我们在 [Slack](https://join.slack.com/t/danswer/shared_invite/zt-1w76msxmd-HJHLe3KNFIAIzk_0dSOKaQ)
+和 [Discord](https://discord.gg/TDJ59cGV2X) 上有支持频道和一般性的有趣讨论。
 
-We would love to see you there!
+我们期待在那里见到你！
 
-## Get Started 🚀
+## 开始使用 🚀
 
-Onyx being a fully functional app, relies on some external software, specifically:
+作为一个完整功能的应用，Onyx 依赖于一些外部软件，具体包括：
 
-- [Postgres](https://www.postgresql.org/) (Relational DB)
-- [Vespa](https://vespa.ai/) (Vector DB/Search Engine)
-- [Redis](https://redis.io/) (Cache)
-- [Nginx](https://nginx.org/) (Not needed for development flows generally)
+- [Postgres](https://www.postgresql.org/)（关系型数据库）
+- [Vespa](https://vespa.ai/)（向量数据库/搜索引擎）
+- [Redis](https://redis.io/)（缓存）
+- [Nginx](https://nginx.org/)（通常开发流程中不需要）
 
-> **Note:**
-> This guide provides instructions to build and run Onyx locally from source with Docker containers providing the above external software. We believe this combination is easier for
-> development purposes. If you prefer to use pre-built container images, we provide instructions on running the full Onyx stack within Docker below.
+> **注意：**
+> 本指南提供了使用 Docker 容器来提供上述外部软件的本地源码构建和运行 Onyx 的说明。我们认为这种组合更适合
+> 开发目的。如果你更喜欢使用预构建的容器镜像，我们在下面提供了在 Docker 中运行完整 Onyx 堆栈的说明。
 
-### Local Set Up
+### 本地设置
 
-Be sure to use Python version 3.11. For instructions on installing Python 3.11 on macOS, refer to the [CONTRIBUTING_MACOS.md](./CONTRIBUTING_MACOS.md) readme.
+请确保使用 Python 3.11 版本。有关在 macOS 上安装 Python 3.11 的说明，请参阅 [CONTRIBUTING_MACOS.md](./CONTRIBUTING_MACOS.md) 自述文件。
 
-If using a lower version, modifications will have to be made to the code.
-If using a higher version, sometimes some libraries will not be available (i.e. we had problems with Tensorflow in the past with higher versions of python).
+如果使用较低版本，则需要对代码进行修改。
+如果使用较高版本，有时某些库将不可用（例如，我们过去在使用较高版本的 Python 时遇到了 Tensorflow 的问题）。
 
-#### Backend: Python requirements
+#### 后端：Python 需求
 
-Currently, we use pip and recommend creating a virtual environment.
+目前，我们使用 pip 并推荐创建一个虚拟环境。
 
-For convenience here's a command for it:
+为了方便，这里有一个命令：
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 ```
 
-> **Note:**
-> This virtual environment MUST NOT be set up WITHIN the onyx directory if you plan on using mypy within certain IDEs.
-> For simplicity, we recommend setting up the virtual environment outside of the onyx directory.
+> **注意：**
+> 如果你计划在某些 IDE 中使用 mypy，则此虚拟环境不能在 onyx 目录内设置。
+> 为了简单起见，我们建议在 onyx 目录外设置虚拟环境。
 
-_For Windows, activate the virtual environment using Command Prompt:_
+_对于 Windows，请使用命令提示符激活虚拟环境：_
 
 ```bash
 .venv\Scripts\activate
 ```
 
-If using PowerShell, the command slightly differs:
+如果使用 PowerShell，命令略有不同：
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-Install the required python dependencies:
+安装所需的 Python 依赖项：
 
 ```bash
-pip install -r onyx/backend/requirements/default.txt
-pip install -r onyx/backend/requirements/dev.txt
-pip install -r onyx/backend/requirements/ee.txt
-pip install -r onyx/backend/requirements/model_server.txt
+pip install -r onyx/backend/requirements/default.txt -i https://mirrors.aliyun.com/pypi/simple/
+pip install -r onyx/backend/requirements/dev.txt -i https://mirrors.aliyun.com/pypi/simple/
+pip install -r onyx/backend/requirements/ee.txt -i https://mirrors.aliyun.com/pypi/simple/
+pip install -r onyx/backend/requirements/model_server.txt -i https://mirrors.aliyun.com/pypi/simple/
 ```
 
-Install Playwright for Python (headless browser required by the Web Connector)
+为 Python 安装 Playwright（Web 连接器所需的无头浏览器）
 
-In the activated Python virtualenv, install Playwright for Python by running:
+在激活的 Python 虚拟环境中，通过运行以下命令安装 Playwright for Python：
 
 ```bash
 playwright install
 ```
 
-You may have to deactivate and reactivate your virtualenv for `playwright` to appear on your path.
+你可能需要停用并重新激活你的虚拟环境，以便 `playwright` 出现在你的��径中。
 
-#### Frontend: Node dependencies
+#### 前端：Node 依赖项
 
-Install [Node.js and npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) for the frontend.
-Once the above is done, navigate to `onyx/web` run:
+为前端安装 [Node.js 和 npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm)。
+完成上述操作后，导航到 `onyx/web` 运行：
 
 ```bash
 npm i
 ```
 
-#### Docker containers for external software
+#### 外部软件的 Docker 容器
 
-You will need Docker installed to run these containers.
+你需要安装 Docker 才能运行这些容器。
 
-First navigate to `onyx/deployment/docker_compose`, then start up Postgres/Vespa/Redis with:
+首先导航到 `onyx/deployment/docker_compose`，然后启动 Postgres/Vespa/Redis：
 
 ```bash
 docker compose -f docker-compose.dev.yml -p onyx-stack up -d index relational_db cache
 ```
 
-(index refers to Vespa, relational_db refers to Postgres, and cache refers to Redis)
+（index 指的是 Vespa，relational_db 指的是 Postgres，cache 指的是 Redis）
 
-#### Running Onyx locally
+#### 本地运行 Onyx
 
-To start the frontend, navigate to `onyx/web` and run:
+要启动前端，请导航到 `onyx/web` 并运行：
 
 ```bash
 npm run dev
 ```
 
-Next, start the model server which runs the local NLP models.
-Navigate to `onyx/backend` and run:
+接下来，启动运行本地 NLP 模型的模型服务器。
+导航到 `onyx/backend` 并运行：
 
 ```bash
 uvicorn model_server.main:app --reload --port 9000
 ```
 
-_For Windows (for compatibility with both PowerShell and Command Prompt):_
+_对于 Windows（兼容 PowerShell 和命令提示符）：_
 
 ```bash
 powershell -Command "uvicorn model_server.main:app --reload --port 9000"
 ```
 
-The first time running Onyx, you will need to run the DB migrations for Postgres.
-After the first time, this is no longer required unless the DB models change.
+第一次运行 Onyx 时，你需要为 Postgres 运行数据库迁移。
+在第一次之后，除非数据库模型发生变化，否则不再需要这样做。
 
-Navigate to `onyx/backend` and with the venv active, run:
+导航到 `onyx/backend` 并在虚拟环境激活的情况下运行：
 
 ```bash
 alembic upgrade head
 ```
 
-Next, start the task queue which orchestrates the background jobs.
-Jobs that take more time are run async from the API server.
+接下来，启动协调后台作业的任务队列。
+需要更多时间的作业将异步运行，不在 API 服务器中运行。
 
-Still in `onyx/backend`, run:
+仍然在 `onyx/backend` 目录中，运行：
 
 ```bash
 python ./scripts/dev_run_background_jobs.py
 ```
 
-To run the backend API server, navigate back to `onyx/backend` and run:
+要运行后端 API 服务器，请返回到 `onyx/backend` 并运行：
 
 ```bash
 AUTH_TYPE=disabled uvicorn onyx.main:app --reload --port 8080
 ```
 
-_For Windows (for compatibility with both PowerShell and Command Prompt):_
+_对于 Windows（兼容 PowerShell 和命令提示符）：_
 
 ```bash
 powershell -Command "
@@ -189,73 +184,72 @@ powershell -Command "
 "
 ```
 
-> **Note:**
-> If you need finer logging, add the additional environment variable `LOG_LEVEL=DEBUG` to the relevant services.
+> **注意：**
+> 如果你需要更详细的日志记录，请为相关服务添加额外的环境变量 `LOG_LEVEL=DEBUG`。
 
-#### Wrapping up
+#### 收尾工作
 
-You should now have 4 servers running:
+你现在应该有 4 个服务器在运行：
 
-- Web server
-- Backend API
-- Model server
-- Background jobs
+- Web 服务器
+- 后端 API
+- 模型服务器
+- 后台作业
 
-Now, visit `http://localhost:3000` in your browser. You should see the Onyx onboarding wizard where you can connect your external LLM provider to Onyx.
+现在，在浏览器中访问 `http://localhost:3000`。你应该会看到 Onyx 入门向导，在这里你可以将你的外部 LLM 提供商连接到 Onyx。
 
-You've successfully set up a local Onyx instance! 🏁
+你已经成功设置了一个本地的 Onyx 实例！ 🏁
 
-#### Running the Onyx application in a container
+#### 在容器中运行 Onyx 应用程序
 
-You can run the full Onyx application stack from pre-built images including all external software dependencies.
+你可以从预构建的镜像运行完整的 Onyx 应用程序堆栈，包括所有外部软件依赖项。
 
-Navigate to `onyx/deployment/docker_compose` and run:
+导航到 `onyx/deployment/docker_compose` 并运行：
 
 ```bash
 docker compose -f docker-compose.dev.yml -p onyx-stack up -d
 ```
 
-After Docker pulls and starts these containers, navigate to `http://localhost:3000` to use Onyx.
+在 Docker 拉取并启动这些容器后，导航到 `http://localhost:3000` 使用 Onyx。
 
-If you want to make changes to Onyx and run those changes in Docker, you can also build a local version of the Onyx container images that incorporates your changes like so:
+如果你想对 Onyx 进行更改并在 Docker 中运行这些更改，你还可以构建一个包含你更改的本地版本的 Onyx 容器镜像，如下所示：
 
 ```bash
 docker compose -f docker-compose.dev.yml -p onyx-stack up -d --build
 ```
 
-### Formatting and Linting
+### 格式化和代码检查
 
-#### Backend
+#### 后端
 
-For the backend, you'll need to setup pre-commit hooks (black / reorder-python-imports).
-First, install pre-commit (if you don't have it already) following the instructions
-[here](https://pre-commit.com/#installation).
+对于后端，你需要设置 pre-commit hooks（black / reorder-python-imports）。
+首先，按照[此处](https://pre-commit.com/#installation)的说明安装 pre-commit（如果你还没有安装）。
 
-With the virtual environment active, install the pre-commit library with:
+在虚拟环境激活的情况下，安装 pre-commit 库：
 
 ```bash
 pip install pre-commit
 ```
 
-Then, from the `onyx/backend` directory, run:
+然后，从 `onyx/backend` 目录运行：
 
 ```bash
 pre-commit install
 ```
 
-Additionally, we use `mypy` for static type checking.
-Onyx is fully type-annotated, and we want to keep it that way!
-To run the mypy checks manually, run `python -m mypy .` from the `onyx/backend` directory.
+此外，我们使用 `mypy` 进行静态类型检查。
+Onyx 是完全类型注释的，我们希望保持这种状态！
+要手动运行 mypy 检查，请从 `onyx/backend` 目录运行 `python -m mypy .`。
 
 #### Web
 
-We use `prettier` for formatting. The desired version (2.8.8) will be installed via a `npm i` from the `onyx/web` directory.
-To run the formatter, use `npx prettier --write .` from the `onyx/web` directory.
-Please double check that prettier passes before creating a pull request.
+我们使用 `prettier` 进行格式化。所需版本（2.8.8）将通过 `onyx/web` 目录中的 `npm i` 安装。
+要运行格式化程序，请从 `onyx/web` 目录使用 `npx prettier --write .`。
+在创建 pull request 之前，请仔细检查 prettier 是否通过。
 
-### Release Process
+### 发布流程
 
-Onyx loosely follows the SemVer versioning standard.
-Major changes are released with a "minor" version bump. Currently we use patch release versions to indicate small feature changes.
-A set of Docker containers will be pushed automatically to DockerHub with every tag.
-You can see the containers [here](https://hub.docker.com/search?q=onyx%2F).
+Onyx 大致遵循 SemVer 版本控制标准。
+重大更改会发布一个“次要”版本更新。目前我们使用补丁版本来表示小的功能更改。
+每个标签都会自动推送一组 Docker 容器到 DockerHub。
+你可以在[这里](https://hub.docker.com/search?q=onyx%2F)查看这些容器。

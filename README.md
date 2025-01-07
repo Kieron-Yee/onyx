@@ -7,7 +7,7 @@
 </h2>
 
 <p align="center">
-<p align="center">Open Source Gen-AI + Enterprise Search.</p>
+<p align="center">开源生成式AI + 企业搜索.</p>
 
 <p align="center">
 <a href="https://docs.onyx.app/" target="_blank">
@@ -24,66 +24,66 @@
 </a>
 </p>
 
-<strong>[Onyx](https://www.onyx.app/)</strong> (formerly Danswer) is the AI Assistant connected to your company's docs, apps, and people.
-Onyx provides a Chat interface and plugs into any LLM of your choice. Onyx can be deployed anywhere and for any
-scale - on a laptop, on-premise, or to cloud. Since you own the deployment, your user data and chats are fully in your
-own control. Onyx is dual Licensed with most of it under MIT license and designed to be modular and easily extensible. The system also comes fully ready
-for production usage with user authentication, role management (admin/basic users), chat persistence, and a UI for
-configuring AI Assistants.
+<strong>[Onyx](https://www.onyx.app/)</strong> (前身为Danswer)是一个连接到您公司文档、应用程序和人员的AI助手。
+Onyx提供聊天界面，并可以连接任何您选择的LLM模型。Onyx可以部署在任何地方���适应任何规模
+- 从笔记本电脑到本地服务器或云端。由于您拥有部署的所有权，您的用户数据和聊天记录完全在您的
+控制之下。Onyx采用双重许可，大部分内容遵循MIT许可证，设计模块化且易于扩展。该系统还完全
+适用于生产环境，具备用户认证、角色管理(管理员/基本用户)、聊天持久化，以及用于
+配置AI助手的用户界面。
 
-Onyx also serves as a Enterprise Search across all common workplace tools such as Slack, Google Drive, Confluence, etc.
-By combining LLMs and team specific knowledge, Onyx becomes a subject matter expert for the team. Imagine ChatGPT if
-it had access to your team's unique knowledge! It enables questions such as "A customer wants feature X, is this already
-supported?" or "Where's the pull request for feature Y?"
+Onyx还可以作为跨所有常用工作场所工具(如Slack、Google Drive、Confluence等)的企业搜索工具。
+通过结合LLM和团队特定知识，Onyx成为团队的专业知识专家。想象一下如果ChatGPT
+能够访问您团队的独特知识会是什么样！它可以回答诸如"客户想要功能X，这是否已经
+支持？"或"功能Y的拉取请求在哪里？"等问题。
 
-<h3>Usage</h3>
+<h3>使用方式</h3>
 
-Onyx Web App:
+Onyx网页应用：
 
 https://github.com/onyx-dot-app/onyx/assets/32520769/563be14c-9304-47b5-bf0a-9049c2b6f410
 
-Or, plug Onyx into your existing Slack workflows (more integrations to come 😁):
+或者，将Onyx集成到您现有的Slack工作流程中（更多集成即将推出😁）：
 
 https://github.com/onyx-dot-app/onyx/assets/25087905/3e19739b-d178-4371-9a38-011430bdec1b
 
-For more details on the Admin UI to manage connectors and users, check out our
-<strong><a href="https://www.youtube.com/watch?v=geNzY1nbCnU">Full Video Demo</a></strong>!
+关于管理连接器和用户的管理界面的更多详情，请查看我们的
+<strong><a href="https://www.youtube.com/watch?v=geNzY1nbCnU">完整视频演示</a></strong>！
 
-## Deployment
+## 部署
 
-Onyx can easily be run locally (even on a laptop) or deployed on a virtual machine with a single
-`docker compose` command. Checkout our [docs](https://docs.onyx.app/quickstart) to learn more.
+Onyx可以轻松地在本地运行（甚至在笔记本电脑上）或通过单个
+`docker compose`命令部署在虚拟机上。查看我们的[文档](https://docs.onyx.app/quickstart)了解更多信息。
 
-We also have built-in support for deployment on Kubernetes. Files for that can be found [here](https://github.com/onyx-dot-app/onyx/tree/main/deployment/kubernetes).
+我们还内置了对Kubernetes部署的支持。相关文件可以在[这里](https://github.com/onyx-dot-app/onyx/tree/main/deployment/kubernetes)找到。
 
-## 💃 Main Features
+## 💃 主要特性
 
-- Chat UI with the ability to select documents to chat with.
-- Create custom AI Assistants with different prompts and backing knowledge sets.
-- Connect Onyx with LLM of your choice (self-host for a fully airgapped solution).
-- Document Search + AI Answers for natural language queries.
-- Connectors to all common workplace tools like Google Drive, Confluence, Slack, etc.
-- Slack integration to get answers and search results directly in Slack.
+- 具备选择文档进行对话功能的聊天界面
+- 创建具有不同提示和知识库支持的自定义AI助手
+- 连接您选择的LLM（自托管可实现完全离线解决方案）
+- 文档搜索 + 自然语言查询的AI回答
+- 连接所有常用工作场所工具，如Google Drive、Confluence、Slack等
+- Slack集成，直接在Slack中获取答案和搜索结果
 
-## 🚧 Roadmap
+## 🚧 路线图
 
-- Chat/Prompt sharing with specific teammates and user groups.
-- Multimodal model support, chat with images, video etc.
-- Choosing between LLMs and parameters during chat session.
-- Tool calling and agent configurations options.
-- Organizational understanding and ability to locate and suggest experts from your team.
+- 与特定团队成员和用户组共享聊天/提示
+- 多模态模型支持，可与图像、视频等进行对话
+- 在聊天会话中选择LLM和参数
+- 工具调用和代理配置选项
+- 组织理解能力，可以定位和推荐团队中的专家
 
-## Other Notable Benefits of Onyx
+## Onyx的其他显著优势
 
-- User Authentication with document level access management.
-- Best in class Hybrid Search across all sources (BM-25 + prefix aware embedding models).
-- Admin Dashboard to configure connectors, document-sets, access, etc.
-- Custom deep learning models + learn from user feedback.
-- Easy deployment and ability to host Onyx anywhere of your choosing.
+- 具有文档级访问管理的用户认证
+- 跨所有来源的最佳混合搜索（BM-25 + 前缀感知嵌入模型）
+- 用于配置连接器、文档集、访问权限等的管理仪表板
+- 自定义深度学习模型 + 从用户反馈中学习
+- 便捷部署，可以在任何您选择的地方托管Onyx
 
-## 🔌 Connectors
+## 🔌 连接器
 
-Efficiently pulls the latest changes from:
+高效获取最新更改，支持：
 
 - Slack
 - GitHub
@@ -106,30 +106,30 @@ Efficiently pulls the latest changes from:
 - Websites
 - And more ...
 
-## 📚 Editions
+## 📚 版本
 
-There are two editions of Onyx:
+Onyx提供两个版本：
 
-- Onyx Community Edition (CE) is available freely under the MIT Expat license. This version has ALL the core features discussed above. This is the version of Onyx you will get if you follow the Deployment guide above.
-- Onyx Enterprise Edition (EE) includes extra features that are primarily useful for larger organizations. Specifically, this includes:
-  - Single Sign-On (SSO), with support for both SAML and OIDC
-  - Role-based access control
-  - Document permission inheritance from connected sources
-  - Usage analytics and query history accessible to admins
-  - Whitelabeling
-  - API key authentication
-  - Encryption of secrets
-  - Any many more! Checkout [our website](https://www.onyx.app/) for the latest.
+- Onyx社区版 (CE) 在MIT Expat许可证下免费提供。该版本包含上述所有核心功能。如果您按照上述部署指南操作，这是您将获得的Onyx版本。
+- Onyx企业版 (EE) 包含主要适用于大型组织的额外功能。具体包括：
+  - 单点登录 (SSO)，支持SAML和OIDC
+  - 基于角色的访问控制
+  - 从连接源继承的文档权限
+  - 管理员可访问的使用分析和查询历史
+  - 白标定制
+  - API密钥认证
+  - 密钥加密
+  - 以及更多！查看[我们的网站](https://www.onyx.app/)了解最新信息。
 
-To try the Onyx Enterprise Edition:
+试用Onyx企业版：
 
-1. Checkout our [Cloud product](https://cloud.onyx.app/signup).
-2. For self-hosting, contact us at [founders@onyx.app](mailto:founders@onyx.app) or book a call with us on our [Cal](https://cal.com/team/danswer/founders).
+1. 查看我们的[云产品](https://cloud.onyx.app/signup)。
+2. 如需自托管，请通过[founders@onyx.app](mailto:founders@onyx.app)联系我们或在[Cal](https://cal.com/team/danswer/founders)上预约与我们通话。
 
-## 💡 Contributing
+## 💡 贡献
 
-Looking to contribute? Please check out the [Contribution Guide](CONTRIBUTING.md) for more details.
+想要贡献代码？请查看[贡献指南](CONTRIBUTING.md)了解更多详情。
 
-## ⭐Star History
+## ⭐Star历史
 
 [![Star History Chart](https://api.star-history.com/svg?repos=onyx-dot-app/onyx&type=Date)](https://star-history.com/#onyx-dot-app/onyx&Date)

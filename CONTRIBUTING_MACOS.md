@@ -1,12 +1,12 @@
-## Some additional notes for Mac Users
+## Mac 用户的其他注意事项
 
-The base instructions to set up the development environment are located in [CONTRIBUTING.md](https://github.com/onyx-dot-app/onyx/blob/main/CONTRIBUTING.md).
+设置开发环境的基本说明位于 [CONTRIBUTING.md](https://github.com/onyx-dot-app/onyx/blob/main/CONTRIBUTING.md)。
 
-### Setting up Python
+### 设置 Python
 
-Ensure [Homebrew](https://brew.sh/) is already set up.
+确保已经设置好 [Homebrew](https://brew.sh/)。
 
-Then install python 3.11.
+然后安装 python 3.11。
 
 ```bash
 brew install python@3.11
