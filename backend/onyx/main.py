@@ -141,6 +141,7 @@ def include_router_with_global_prefix_prepended(
     application: FastAPI, router: APIRouter, **kwargs: Any
 ) -> None:
     """Adds the global prefix to all routes in the router."""
+    # 为路由中的所有路径添加全局前缀
     processed_global_prefix = f"/{APP_API_PREFIX.strip('/')}" if APP_API_PREFIX else ""
 
     passed_in_prefix = cast(str | None, kwargs.get("prefix"))
@@ -160,6 +161,7 @@ def include_auth_router_with_prefix(
     application: FastAPI, router: APIRouter, prefix: str, tags: list[str] | None = None
 ) -> None:
     """Wrapper function to include an 'auth' router with prefix + rate-limiting dependencies."""
+    # 包装函数，用于包含带有前缀和速率限制依赖项的“auth”路由
     final_tags = tags or ["auth"]
     include_router_with_global_prefix_prepended(
         application,
@@ -173,6 +175,7 @@ def include_auth_router_with_prefix(
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     # Set recursion limit
+    # 设置递归限制
     if SYSTEM_RECURSION_LIMIT is not None:
         sys.setrecursionlimit(SYSTEM_RECURSION_LIMIT)
         logger.notice(f"System recursion limit set to {SYSTEM_RECURSION_LIMIT}")
@@ -189,22 +192,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     )
 
     # Will throw exception if an issue is found
+    # 如果发现问题，将抛出异常
     verify_auth()
 
     if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
         logger.notice("Both OAuth Client ID and Secret are configured.")
+        # OAuth客户端ID和密钥均已配置
 
     if DISABLE_GENERATIVE_AI:
         logger.notice("Generative AI Q&A disabled")
+        # 生成式AI问答已禁用
 
     # fill up Postgres connection pools
+    # 填充Postgres连接池
     await warm_up_connections()
 
     if not MULTI_TENANT:
         # We cache this at the beginning so there is no delay in the first telemetry
+        # 我们在开始时缓存这个，以便第一次遥测不会有延迟
         get_or_generate_uuid()
 
         # If we are multi-tenant, we need to only set up initial public tables
+        # 如果我们是多租户，我��只需要设置初始的公共表
         with Session(engine) as db_session:
             setup_onyx(db_session, None)
     else:
@@ -213,11 +222,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     optional_telemetry(record_type=RecordType.VERSION, data={"version": __version__})
 
     # Set up rate limiter
+    # 设置速率限制器
     await setup_limiter()
 
     yield
 
     # Close rate limiter
+    # 关闭速率限制器
     await close_limiter()
 
 
@@ -226,6 +237,7 @@ def log_http_error(_: Request, exc: Exception) -> JSONResponse:
 
     if isinstance(exc, BasicAuthenticationError):
         # For BasicAuthenticationError, just log a brief message without stack trace (almost always spam)
+        # 对于BasicAuthenticationError，只记录简短消息而不记录堆栈跟踪（几乎总是垃圾邮件）
         logger.warning(f"Authentication failed: {str(exc)}")
 
     elif status_code >= 400:
@@ -249,8 +261,10 @@ def get_application() -> FastAPI:
             traces_sample_rate=0.1,
         )
         logger.info("Sentry initialized")
+        # Sentry已初始化
     else:
         logger.debug("Sentry DSN not provided, skipping Sentry initialization")
+        # 未提供Sentry DSN，跳过Sentry初始化
 
     application.add_exception_handler(status.HTTP_400_BAD_REQUEST, log_http_error)
     application.add_exception_handler(status.HTTP_401_UNAUTHORIZED, log_http_error)
@@ -304,6 +318,7 @@ def get_application() -> FastAPI:
 
     if AUTH_TYPE == AuthType.DISABLED:
         # Server logs this during auth setup verification step
+        # 服务器在身份验证设置验证步骤中记录此信息
         pass
 
     if AUTH_TYPE == AuthType.BASIC or AUTH_TYPE == AuthType.CLOUD:
@@ -346,12 +361,14 @@ def get_application() -> FastAPI:
                 associate_by_email=True,
                 is_verified_by_default=True,
                 # Points the user back to the login page
+                # 将用户指向登录页面
                 redirect_url=f"{WEB_DOMAIN}/auth/oauth/callback",
             ),
             prefix="/auth/oauth",
         )
 
         # Need basic auth router for `logout` endpoint
+        # 需要基本身份验证路由器用于`logout`端点
         include_auth_router_with_prefix(
             application,
             fastapi_users.get_logout_router(auth_backend),
@@ -367,6 +384,7 @@ def get_application() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ALLOWED_ORIGIN,  # Configurable via environment variable
+        # 可通过环境变量配置
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -375,6 +393,7 @@ def get_application() -> FastAPI:
         add_latency_logging_middleware(application, logger)
 
     # Ensure all routes have auth enabled or are explicitly marked as public
+    # 确保所有路由都启用了身份验证或明确标记为公共
     check_router_auth(application)
 
     return application
@@ -382,6 +401,7 @@ def get_application() -> FastAPI:
 
 # NOTE: needs to be outside of the `if __name__ == "__main__"` block so that the
 # app is exportable
+# 注意：需要在`if __name__ == "__main__"`块之外，以便应用程序可以导出
 set_is_ee_based_on_env_variable()
 app = fetch_versioned_implementation(module="onyx.main", attribute="get_application")
 
@@ -393,5 +413,6 @@ if __name__ == "__main__":
 
     if global_version.is_ee_version():
         logger.notice("Running Enterprise Edition")
+        # 运行企业版
 
     uvicorn.run(app, host=APP_HOST, port=APP_PORT)
