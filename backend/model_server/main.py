@@ -38,11 +38,13 @@ logger = setup_logger()
 def _move_files_recursively(source: Path, dest: Path, overwrite: bool = False) -> None:
     """
     This moves the files from the temp huggingface cache to the huggingface cache
+    我们将文件从临时 huggingface 缓存移动到 huggingface 缓存
 
     We have to move each file individually because the directories might
     have the same name but not the same contents and we dont want to remove
     the files in the existing huggingface cache that don't exist in the temp
     huggingface cache.
+    我们必须逐个移动文件，因为目录可能具有相同的名称但内容不同，我们不想删除现有 huggingface 缓存中不存在于临时 huggingface 缓存中的文件。
     """
 
     for item in source.iterdir():
@@ -60,24 +62,31 @@ def _move_files_recursively(source: Path, dest: Path, overwrite: bool = False) -
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     if torch.cuda.is_available():
         logger.notice("CUDA GPU is available")
+        # "CUDA GPU 可用"
     elif torch.backends.mps.is_available():
         logger.notice("Mac MPS is available")
+        # "Mac MPS 可用"
     else:
         logger.notice("GPU is not available, using CPU")
+        # "GPU 不可用，使用 CPU"
 
     if TEMP_HF_CACHE_PATH.is_dir():
         logger.notice("Moving contents of temp_huggingface to huggingface cache.")
+        # "将 temp_huggingface 的内容移动到 huggingface 缓存。"
         _move_files_recursively(TEMP_HF_CACHE_PATH, HF_CACHE_PATH)
         shutil.rmtree(TEMP_HF_CACHE_PATH, ignore_errors=True)
         logger.notice("Moved contents of temp_huggingface to huggingface cache.")
+        # "已将 temp_huggingface 的内容移动到 huggingface 缓存。"
 
     torch.set_num_threads(max(MIN_THREADS_ML_MODELS, torch.get_num_threads()))
     logger.notice(f"Torch Threads: {torch.get_num_threads()}")
+    # f"Torch 线程数: {torch.get_num_threads()}"
 
     if not INDEXING_ONLY:
         warm_up_intent_model()
     else:
         logger.notice("This model server should only run document indexing.")
+        # "此模型服务器应仅运行文档索引。"
 
     yield
 
@@ -110,5 +119,7 @@ if __name__ == "__main__":
     logger.notice(
         f"Starting Onyx Model Server on http://{MODEL_SERVER_ALLOWED_HOST}:{str(MODEL_SERVER_PORT)}/"
     )
+    # f"在 http://{MODEL_SERVER_ALLOWED_HOST}:{str(MODEL_SERVER_PORT)}/ 启动 Onyx 模型服务器"
     logger.notice(f"Model Server Version: {__version__}")
+    # f"模型服务器版本: {__version__}"
     uvicorn.run(app, host=MODEL_SERVER_ALLOWED_HOST, port=MODEL_SERVER_PORT)
