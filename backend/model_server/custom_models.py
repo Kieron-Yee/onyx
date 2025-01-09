@@ -31,10 +31,12 @@ _CONNECTOR_CLASSIFIER_MODEL: ConnectorClassifier | None = None
 _INTENT_TOKENIZER: AutoTokenizer | None = None
 _INTENT_MODEL: HybridClassifier | None = None
 
-
+# 获取连接器分类器的分词器
+# Get the tokenizer for the connector classifier
 def get_connector_classifier_tokenizer() -> AutoTokenizer:
     global _CONNECTOR_CLASSIFIER_TOKENIZER
     if _CONNECTOR_CLASSIFIER_TOKENIZER is None:
+        # 分词器详情未上传到HF hub，因为它只是未修改的distilbert分词器。
         # The tokenizer details are not uploaded to the HF hub since it's just the
         # unmodified distilbert tokenizer.
         _CONNECTOR_CLASSIFIER_TOKENIZER = AutoTokenizer.from_pretrained(
@@ -42,7 +44,8 @@ def get_connector_classifier_tokenizer() -> AutoTokenizer:
         )
     return _CONNECTOR_CLASSIFIER_TOKENIZER
 
-
+# 获取本地连接器分类器模型
+# Get the local connector classifier model
 def get_local_connector_classifier(
     model_name_or_path: str = CONNECTOR_CLASSIFIER_MODEL_REPO,
     tag: str = CONNECTOR_CLASSIFIER_MODEL_TAG,
@@ -50,6 +53,7 @@ def get_local_connector_classifier(
     global _CONNECTOR_CLASSIFIER_MODEL
     if _CONNECTOR_CLASSIFIER_MODEL is None:
         try:
+            # 计算缓存位置，然后从本地加载（如果可用）
             # Calculate where the cache should be, then load from local if available
             local_path = snapshot_download(
                 repo_id=model_name_or_path, revision=tag, local_files_only=True
@@ -60,6 +64,7 @@ def get_local_connector_classifier(
         except Exception as e:
             logger.warning(f"Failed to load model directly: {e}")
             try:
+                # 尝试下载模型快照
                 # Attempt to download the model snapshot
                 logger.info(f"Downloading model snapshot for {model_name_or_path}")
                 local_path = snapshot_download(repo_id=model_name_or_path, revision=tag)
@@ -73,16 +78,19 @@ def get_local_connector_classifier(
                 raise
     return _CONNECTOR_CLASSIFIER_MODEL
 
-
+# 获取意图模型的分词器
+# Get the tokenizer for the intent model
 def get_intent_model_tokenizer() -> AutoTokenizer:
     global _INTENT_TOKENIZER
     if _INTENT_TOKENIZER is None:
+        # 分词器详情未上传到HF hub，因为它只是未修改的distilbert分词器。
         # The tokenizer details are not uploaded to the HF hub since it's just the
         # unmodified distilbert tokenizer.
         _INTENT_TOKENIZER = AutoTokenizer.from_pretrained("distilbert-base-uncased")
     return _INTENT_TOKENIZER
 
-
+# 获取本地意图模型
+# Get the local intent model
 def get_local_intent_model(
     model_name_or_path: str = INTENT_MODEL_VERSION,
     tag: str = INTENT_MODEL_TAG,
@@ -90,6 +98,7 @@ def get_local_intent_model(
     global _INTENT_MODEL
     if _INTENT_MODEL is None:
         try:
+            # 计算缓存位置，然后从本地加载（如果可用）
             # Calculate where the cache should be, then load from local if available
             logger.notice(f"Loading model from local cache: {model_name_or_path}")
             local_path = snapshot_download(
@@ -100,6 +109,7 @@ def get_local_intent_model(
         except Exception as e:
             logger.warning(f"Failed to load model directly: {e}")
             try:
+                # 尝试下载模型快照
                 # Attempt to download the model snapshot
                 logger.notice(f"Downloading model snapshot for {model_name_or_path}")
                 local_path = snapshot_download(repo_id=model_name_or_path, revision=tag)
@@ -111,7 +121,8 @@ def get_local_intent_model(
                 raise
     return _INTENT_MODEL
 
-
+# 对连接器分类查询进行分词
+# Tokenize the connectors & user query into one prompt for the forward pass of ConnectorClassifier models
 def tokenize_connector_classification_query(
     connectors: list[str],
     query: str,
@@ -119,8 +130,9 @@ def tokenize_connector_classification_query(
     connector_token_end_id: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Tokenize the connectors & user query into one prompt for the forward pass of ConnectorClassifier models
+    将连接器和用户查询分词为一个提示，用于ConnectorClassifier模型的前向传递
 
+    注意力掩码全为1。提示是CLS + 每个连接器名称后缀连接器结束标记，然后是用户查询。
     The attention mask is just all 1s. The prompt is CLS + each connector name suffixed with the connector end
     token and then the user query.
     """
@@ -160,7 +172,8 @@ def tokenize_connector_classification_query(
 
     return input_ids.unsqueeze(0), attention_mask.unsqueeze(0)
 
-
+# 预热连接器分类器模型
+# Warm up the connector classifier model
 def warm_up_connector_classifier_model() -> None:
     logger.info(
         f"Warming up connector_classifier model {CONNECTOR_CLASSIFIER_MODEL_TAG}"
@@ -179,7 +192,8 @@ def warm_up_connector_classifier_model() -> None:
 
     connector_classifier(input_ids, attention_mask)
 
-
+# 预热意图模型
+# Warm up the intent model
 def warm_up_intent_model() -> None:
     logger.notice(f"Warming up Intent Model: {INTENT_MODEL_VERSION}")
     intent_tokenizer = get_intent_model_tokenizer()
@@ -194,7 +208,8 @@ def warm_up_intent_model() -> None:
         query_mask=tokens["attention_mask"].to(device),
     )
 
-
+# 运行推理
+# Run inference
 @simple_log_function_time()
 def run_inference(tokens: BatchEncoding) -> tuple[list[float], list[float]]:
     intent_model = get_local_intent_model()
@@ -208,16 +223,19 @@ def run_inference(tokens: BatchEncoding) -> tuple[list[float], list[float]]:
     token_logits = outputs["token_logits"]
     intent_logits = outputs["intent_logits"]
 
+    # 在应用softmax并转换为numpy之前，将张量移动到CPU
     # Move tensors to CPU before applying softmax and converting to numpy
     intent_probabilities = F.softmax(intent_logits.cpu(), dim=-1).numpy()[0]
     token_probabilities = F.softmax(token_logits.cpu(), dim=-1).numpy()[0]
 
+    # 提取每个token的正类（索引1）概率
     # Extract the probabilities for the positive class (index 1) for each token
     token_positive_probs = token_probabilities[:, 1].tolist()
 
     return intent_probabilities.tolist(), token_positive_probs
 
-
+# 映射关键词
+# Map keywords
 def map_keywords(
     input_ids: torch.Tensor, tokenizer: AutoTokenizer, is_keyword: list[bool]
 ) -> list[str]:
@@ -250,6 +268,7 @@ def map_keywords(
                     keywords.append(current_keyword)
                 current_keyword = token
         else:
+            # 如果错误预测了关键词的后续token，将其添加到当前关键词以完成它
             # If mispredicted a later token of a keyword, add it to the current keyword
             # to complete it
             if current_keyword:
@@ -265,7 +284,8 @@ def map_keywords(
 
     return keywords
 
-
+# 清理关键词
+# Clean keywords
 def clean_keywords(keywords: list[str]) -> list[str]:
     cleaned_words = []
     for word in keywords:
@@ -275,7 +295,8 @@ def clean_keywords(keywords: list[str]) -> list[str]:
         cleaned_words.extend([w for w in word.strip().split() if w and not w.isspace()])
     return cleaned_words
 
-
+# 运行连接器分类
+# Run connector classification
 def run_connector_classification(req: ConnectorClassificationRequest) -> list[str]:
     tokenizer = get_connector_classifier_tokenizer()
     model = get_local_connector_classifier()
@@ -304,7 +325,8 @@ def run_connector_classification(req: ConnectorClassificationRequest) -> list[st
 
     return passed_connectors
 
-
+# 运行分析
+# Run analysis
 def run_analysis(intent_req: IntentRequest) -> tuple[bool, list[str]]:
     tokenizer = get_intent_model_tokenizer()
     model_input = tokenizer(
@@ -312,6 +334,7 @@ def run_analysis(intent_req: IntentRequest) -> tuple[bool, list[str]]:
     )
 
     if len(model_input.input_ids[0]) > 512:
+        # 如果用户文本太长，假设它是语义的并保留所有单词
         # If the user text is too long, assume it is semantic and keep all words
         return True, intent_req.query.split()
 
@@ -329,6 +352,7 @@ def run_analysis(intent_req: IntentRequest) -> tuple[bool, list[str]]:
         logger.error(
             f"Failed to extract keywords for query: {intent_req.query} due to {e}"
         )
+        # 回退到保留所有单词
         # Fallback to keeping all words
         keywords = intent_req.query.split()
 
@@ -336,7 +360,8 @@ def run_analysis(intent_req: IntentRequest) -> tuple[bool, list[str]]:
 
     return is_keyword_sequence, cleaned_keywords
 
-
+# 处理连接器分类请求
+# Process connector classification request
 @router.post("/connector-classification")
 async def process_connector_classification_request(
     classification_request: ConnectorClassificationRequest,
@@ -352,7 +377,8 @@ async def process_connector_classification_request(
     connectors = run_connector_classification(classification_request)
     return ConnectorClassificationResponse(connectors=connectors)
 
-
+# 处理查询分析请求
+# Process query analysis request
 @router.post("/query-analysis")
 async def process_analysis_request(
     intent_request: IntentRequest,

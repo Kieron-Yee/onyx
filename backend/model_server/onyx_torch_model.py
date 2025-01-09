@@ -7,7 +7,8 @@ from transformers import DistilBertConfig  # type: ignore
 from transformers import DistilBertModel  # type: ignore
 from transformers import DistilBertTokenizer  # type: ignore
 
-
+# HybridClassifier class for keyword and intent classification
+# HybridClassifier 类用于关键词和意图分类
 class HybridClassifier(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -15,9 +16,11 @@ class HybridClassifier(nn.Module):
         self.distilbert = DistilBertModel(config)
 
         # Keyword tokenwise binary classification layer
+        # 关键词逐字二分类层
         self.keyword_classifier = nn.Linear(self.distilbert.config.dim, 2)
 
         # Intent Classifier layers
+        # 意图分类层
         self.pre_classifier = nn.Linear(
             self.distilbert.config.dim, self.distilbert.config.dim
         )
@@ -34,11 +37,13 @@ class HybridClassifier(nn.Module):
         sequence_output = outputs.last_hidden_state
 
         # Intent classification on the CLS token
+        # 在CLS标记上进行意图分类
         cls_token_state = sequence_output[:, 0, :]
         pre_classifier_out = self.pre_classifier(cls_token_state)
         intent_logits = self.intent_classifier(pre_classifier_out)
 
         # Keyword classification on all tokens
+        # 对所有标记进行关键词分类
         token_logits = self.keyword_classifier(sequence_output)
 
         return {"intent_logits": intent_logits, "token_logits": token_logits}
@@ -67,12 +72,14 @@ class HybridClassifier(nn.Module):
 
         model.eval()
         # Eval doesn't set requires_grad to False, do it manually to save memory and have faster inference
+        # Eval 不会将 requires_grad 设置为 False，手动设置以节省内存并加快推理速度
         for param in model.parameters():
             param.requires_grad = False
 
         return model
 
-
+# ConnectorClassifier class for connector classification
+# ConnectorClassifier 类用于连接器分类
 class ConnectorClassifier(nn.Module):
     def __init__(self, config: DistilBertConfig) -> None:
         super().__init__()
@@ -84,6 +91,7 @@ class ConnectorClassifier(nn.Module):
         self.tokenizer = DistilBertTokenizer.from_pretrained("distilbert-base-uncased")
 
         # Token indicating end of connector name, and on which classifier is used
+        # 指示连接器名称结束的标记，并在其上使用分类器
         self.connector_end_token_id = self.tokenizer.get_vocab()[
             self.config.connector_end_token
         ]

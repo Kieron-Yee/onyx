@@ -15,7 +15,8 @@ logger = setup_logger()
 F = TypeVar("F", bound=Callable)
 FG = TypeVar("FG", bound=Callable[..., Generator | Iterator])
 
-
+# This decorator logs the execution time of a function
+# 这个装饰器记录函数的执行时间
 def simple_log_function_time(
     func_name: str | None = None,
     debug_only: bool = False,
