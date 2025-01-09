@@ -1,22 +1,22 @@
 <!-- DANSWER_METADATA={"link": "https://github.com/onyx-dot-app/onyx/blob/main/backend/alembic/README.md"} -->
 
-# Alembic DB Migrations
+# Alembic 数据库迁移
 
-These files are for creating/updating the tables in the Relational DB (Postgres).
-Onyx migrations use a generic single-database configuration with an async dbapi.
+这些文件用于在关系数据库（Postgres）中创建/更新表。
+Onyx 迁移使用通用的单数据库配置和异步 dbapi。
 
-## To generate new migrations:
+## 生成新的迁移：
 
-run from onyx/backend:
-`alembic revision --autogenerate -m <DESCRIPTION_OF_MIGRATION>`
+在 onyx/backend 目录下运行：
+`alembic revision --autogenerate -m <迁移描述>`
 
-More info can be found here: https://alembic.sqlalchemy.org/en/latest/autogenerate.html
+更多信息可以在这里找到：https://alembic.sqlalchemy.org/en/latest/autogenerate.html
 
-## Running migrations
+## 运行迁移
 
-To run all un-applied migrations:
+运行所有未应用的迁移：
 `alembic upgrade head`
 
-To undo migrations:
+撤销迁移：
 `alembic downgrade -X`
-where X is the number of migrations you want to undo from the current state
+其中 X 是您要从当前状态撤销的迁移数量

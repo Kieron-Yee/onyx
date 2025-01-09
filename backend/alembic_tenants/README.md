@@ -1,3 +1,3 @@
-These files are for public table migrations when operating with multi tenancy.
+这些文件用于在操作多租户时进行公共表迁移。
 
-If you are not a Onyx developer, you can ignore this directory entirely.
+如果您不是 Onyx 开发人员，可以完全忽略此目录。
