@@ -17,20 +17,20 @@ class ConnectorClassificationResponse(BaseModel):
 
 # EmbedRequest类用于表示嵌入请求
 class EmbedRequest(BaseModel):
-    texts: list[str]
+    texts: list[str] # 需要进行嵌入的文本列表
     # Can be none for cloud embedding model requests, error handling logic exists for other cases
     # 对于云嵌入模型请求可以为None，其他情况下存在错误处理逻辑
-    model_name: str | None = None
-    deployment_name: str | None = None
-    max_context_length: int
-    normalize_embeddings: bool
-    api_key: str | None = None
-    provider_type: EmbeddingProvider | None = None
-    text_type: EmbedTextType
-    manual_query_prefix: str | None = None
-    manual_passage_prefix: str | None = None
-    api_url: str | None = None
-    api_version: str | None = None
+    model_name: str | None = None            # 嵌入模型的名称(可选)
+    deployment_name: str | None = None       # Azure部署的模型名称(可选)
+    max_context_length: int                  # 文本最大上下文长度限制
+    normalize_embeddings: bool               # 是否对嵌入向量进行归一化
+    api_key: str | None = None              # API密钥(用于云服务)
+    provider_type: EmbeddingProvider | None  # 提供商类型(如OpenAI/Cohere等)
+    text_type: EmbedTextType                # 文本类型(查询或段落)
+    manual_query_prefix: str | None = None   # 查询文本的手动前缀
+    manual_passage_prefix: str | None = None # 段落文本的手动前缀
+    api_url: str | None = None              # API端点URL
+    api_version: str | None = None          # API版本
     # This disables the "model_" protected namespace for pydantic
     # 这将禁用pydantic的"model_"保护命名空间
     model_config = {"protected_namespaces": ()}
@@ -41,12 +41,12 @@ class EmbedResponse(BaseModel):
 
 # RerankRequest类用于表示重新排序请求
 class RerankRequest(BaseModel):
-    query: str
-    documents: list[str]
-    model_name: str
-    provider_type: RerankerProvider | None = None
-    api_key: str | None = None
-    api_url: str | None = None
+    query: str                              # 查询文本
+    documents: list[str]                    # 需要重新排序的文档列表
+    model_name: str                         # 重排序模型名称
+    provider_type: RerankerProvider | None  # 重排序服务提供商
+    api_key: str | None = None             # API密钥
+    api_url: str | None = None             # API端点URL
 
     # This disables the "model_" protected namespace for pydantic
     # 这将禁用pydantic的"model_"保护命名空间
