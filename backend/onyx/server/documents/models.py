@@ -1,3 +1,9 @@
+"""
+这个文件定义了文档系统相关的数据模型类。
+包含了文档同步状态、连接器配置、凭证管理、索引任务等相关的数据模型。
+主要用于处理文档的同步、索引和管理功能。
+"""
+
 from datetime import datetime
 from typing import Any
 from typing import Generic
@@ -27,12 +33,20 @@ from onyx.server.utils import mask_credential_dict
 
 
 class DocumentSyncStatus(BaseModel):
-    doc_id: str
-    last_synced: datetime | None
-    last_modified: datetime | None
+    """文档同步状态模型，用于跟踪文档的同步状态"""
+    doc_id: str  # 文档ID
+    last_synced: datetime | None  # 最后同步时间
+    last_modified: datetime | None  # 最后修改时间
 
     @classmethod
     def from_model(cls, doc: DbDocument) -> "DocumentSyncStatus":
+        """
+        从数据库文档模型创建同步状态对象
+        Args:
+            doc: 数据库文档模型
+        Returns:
+            DocumentSyncStatus: 文档同步状态对象
+        """
         return DocumentSyncStatus(
             doc_id=doc.id,
             last_synced=doc.last_synced,
@@ -41,46 +55,58 @@ class DocumentSyncStatus(BaseModel):
 
 
 class DocumentInfo(BaseModel):
-    num_chunks: int
-    num_tokens: int
+    """文档信息模型，包含文档的基本统计信息"""
+    num_chunks: int  # 文档分块数量
+    num_tokens: int  # 文档令牌数量
 
 
 class ChunkInfo(BaseModel):
-    content: str
-    num_tokens: int
+    """文档块信息模型"""
+    content: str  # 块内容
+    num_tokens: int  # 块中的令牌数量
 
 
 class DeletionAttemptSnapshot(BaseModel):
-    connector_id: int
-    credential_id: int
-    status: TaskStatus
+    """删除尝试快照模型,用于记录删除操作的状态"""
+    connector_id: int  # 连接器ID
+    credential_id: int  # 凭证ID 
+    status: TaskStatus  # 任务状态
 
 
 class ConnectorBase(BaseModel):
-    name: str
-    source: DocumentSource
-    input_type: InputType
-    connector_specific_config: dict[str, Any]
+    """连接器基础模型"""
+    name: str  # 连接器名称
+    source: DocumentSource  # 文档来源
+    input_type: InputType  # 输入类型
+    connector_specific_config: dict[str, Any]  # 连接器特定配置
     # In seconds, None for one time index with no refresh
+    # 刷新频率(秒)，None表示一次性索引无需刷新
     refresh_freq: int | None = None
-    prune_freq: int | None = None
-    indexing_start: datetime | None = None
+    prune_freq: int | None = None  # 清理频率
+    indexing_start: datetime | None = None  # 索引开始时间
 
 
 class ConnectorUpdateRequest(ConnectorBase):
-    access_type: AccessType
-    groups: list[int] = Field(default_factory=list)
+    """连接器更新请求模型"""
+    access_type: AccessType  # 访问类型
+    groups: list[int] = Field(default_factory=list)  # 组ID列表
 
     def to_connector_base(self) -> ConnectorBase:
+        """
+        将更新请求转换为基础连接器模型
+        Returns:
+            ConnectorBase: 基础连接器模型
+        """
         return ConnectorBase(**self.model_dump(exclude={"access_type", "groups"}))
 
 
 class ConnectorSnapshot(ConnectorBase):
-    id: int
-    credential_ids: list[int]
-    time_created: datetime
-    time_updated: datetime
-    source: DocumentSource
+    """连接器快照模型,包含连接器的完整信息"""
+    id: int  # 连接器ID
+    credential_ids: list[int]  # 关联的凭证ID列表
+    time_created: datetime  # 创建时间
+    time_updated: datetime  # 更新时间
+    source: DocumentSource  # 数据来源
 
     @classmethod
     def from_connector_db_model(cls, connector: Connector) -> "ConnectorSnapshot":
@@ -102,33 +128,45 @@ class ConnectorSnapshot(ConnectorBase):
 
 
 class CredentialSwapRequest(BaseModel):
-    new_credential_id: int
-    connector_id: int
+    """凭证交换请求模型,用于更换连接器使用的凭证"""
+    new_credential_id: int  # 新凭证ID
+    connector_id: int  # 连接器ID
 
 
 class CredentialDataUpdateRequest(BaseModel):
-    name: str
-    credential_json: dict[str, Any]
+    """凭证数据更新请求模型"""
+    name: str  # 凭证名称
+    credential_json: dict[str, Any]  # 凭证JSON数据
 
 
 class CredentialBase(BaseModel):
-    credential_json: dict[str, Any]
+    """凭证基础模型"""
+    credential_json: dict[str, Any]  # 凭证JSON数据
     # if `true`, then all Admins will have access to the credential
-    admin_public: bool
-    source: DocumentSource
-    name: str | None = None
-    curator_public: bool = False
-    groups: list[int] = Field(default_factory=list)
+    # 如果为true,则所有管理员都可以访问该凭证
+    admin_public: bool  # 是否对管理员公开
+    source: DocumentSource  # 数据来源
+    name: str | None = None  # 凭证名称
+    curator_public: bool = False  # 是否对策展人公开
+    groups: list[int] = Field(default_factory=list)  # 组ID列表
 
 
 class CredentialSnapshot(CredentialBase):
-    id: int
-    user_id: UUID | None
-    time_created: datetime
-    time_updated: datetime
+    """凭证快照模型,包含凭证的完整信息"""
+    id: int  # 凭证ID
+    user_id: UUID | None  # 用户ID
+    time_created: datetime  # 创建时间
+    time_updated: datetime  # 更新时间
 
     @classmethod
     def from_credential_db_model(cls, credential: Credential) -> "CredentialSnapshot":
+        """
+        从数据库凭证模型创建快照对象
+        Args:
+            credential: 数据库中的凭证模型
+        Returns:
+            CredentialSnapshot: 凭证快照对象
+        """
         return CredentialSnapshot(
             id=credential.id,
             credential_json=(
@@ -147,21 +185,29 @@ class CredentialSnapshot(CredentialBase):
 
 
 class IndexAttemptSnapshot(BaseModel):
-    id: int
-    status: IndexingStatus | None
-    new_docs_indexed: int  # only includes completely new docs
-    total_docs_indexed: int  # includes docs that are updated
-    docs_removed_from_index: int
-    error_msg: str | None
-    error_count: int
-    full_exception_trace: str | None
-    time_started: str | None
-    time_updated: str
+    """索引尝试快照模型,记录索引操作的状态和结果"""
+    id: int  # 索引尝试ID
+    status: IndexingStatus | None  # 索引状态
+    new_docs_indexed: int  # 仅包含完全新的文档数量 / only includes completely new docs
+    total_docs_indexed: int  # 包含更新的文档总数 / includes docs that are updated
+    docs_removed_from_index: int  # 从索引中移除的文档数
+    error_msg: str | None  # 错误信息
+    error_count: int  # 错误数量
+    full_exception_trace: str | None  # 完整异常堆栈
+    time_started: str | None  # 开始时间
+    time_updated: str  # 更新时间
 
     @classmethod
     def from_index_attempt_db_model(
         cls, index_attempt: IndexAttempt
     ) -> "IndexAttemptSnapshot":
+        """
+        从数据库索引尝试模型创建快照对象
+        Args:
+            index_attempt: 数据库中的索引尝试模型
+        Returns:
+            IndexAttemptSnapshot: 索引尝试快照对象
+        """
         return IndexAttemptSnapshot(
             id=index_attempt.id,
             status=index_attempt.status,
@@ -181,16 +227,24 @@ class IndexAttemptSnapshot(BaseModel):
 
 
 class IndexAttemptError(BaseModel):
-    id: int
-    index_attempt_id: int | None
-    batch_number: int | None
-    doc_summaries: list[DocumentErrorSummary]
-    error_msg: str | None
-    traceback: str | None
-    time_created: str
+    """索引尝试错误模型,记录索引过程中发生的错误"""
+    id: int  # 错误ID
+    index_attempt_id: int | None  # 关联的索引尝试ID
+    batch_number: int | None  # 批次号
+    doc_summaries: list[DocumentErrorSummary]  # 文档错误摘要列表
+    error_msg: str | None  # 错误信息
+    traceback: str | None  # 错误堆栈
+    time_created: str  # 创建时间
 
     @classmethod
     def from_db_model(cls, error: DbIndexAttemptError) -> "IndexAttemptError":
+        """
+        从数据库错误模型创建错误对象
+        Args:
+            error: 数据库中的错误模型
+        Returns:
+            IndexAttemptError: 索引尝试错误对象
+        """
         doc_summaries = [
             DocumentErrorSummary.from_dict(summary) for summary in error.doc_summaries
         ]
@@ -216,14 +270,19 @@ PaginatedType = TypeVar(
 
 
 class PaginatedReturn(BaseModel, Generic[PaginatedType]):
-    items: list[PaginatedType]
-    total_items: int
+    """分页返回模型"""
+    items: list[PaginatedType]  # 分页项目列表
+    total_items: int  # 总项目数
 
 
 class CCPairFullInfo(BaseModel):
-    id: int
-    name: str
-    status: ConnectorCredentialPairStatus
+    """
+    连接器-凭证对完整信息模型
+    用于展示连接器和凭证配对的详细信息
+    """
+    id: int  # 配对ID
+    name: str  # 配对名称
+    status: ConnectorCredentialPairStatus  # 配对状态
     num_docs_indexed: int
     connector: ConnectorSnapshot
     credential: CredentialSnapshot
@@ -248,10 +307,26 @@ class CCPairFullInfo(BaseModel):
         is_editable_for_current_user: bool,
         indexing: bool,
     ) -> "CCPairFullInfo":
+        """
+        从数据库模型创建完整信息对象
+        Args:
+            cc_pair_model: 连接器-凭证对模型
+            latest_deletion_attempt: 最新删除尝试
+            number_of_index_attempts: 索引尝试次数
+            last_index_attempt: 最后索引尝试
+            num_docs_indexed: 已索引文档数
+            is_editable为当前用户: 当前用户是否可编辑
+            indexing: 是否正在索引
+        Returns:
+            CCPairFullInfo: 完整信息对象
+        """
         # figure out if we need to artificially deflate the number of docs indexed.
         # This is required since the total number of docs indexed by a CC Pair is
         # updated before the new docs for an indexing attempt. If we don't do this,
         # there is a mismatch between these two numbers which may confuse users.
+        # 判断是否需要人为减少已索引文档数。
+        # 这是必要的，因为CC对的总索引文档数在新文档索引尝试之前就更新了。
+        # 如果不这样做，这两个数字之间可能会不匹配，可能会使用户感到困惑。
         last_indexing_status = last_index_attempt.status if last_index_attempt else None
         if (
             last_indexing_status == IndexingStatus.SUCCESS
@@ -289,113 +364,130 @@ class CCPairFullInfo(BaseModel):
 
 
 class CeleryTaskStatus(BaseModel):
-    id: str
-    name: str
-    status: TaskStatus
-    start_time: datetime | None
-    register_time: datetime | None
+    """Celery任务状态模型"""
+    id: str  # 任务ID
+    name: str  # 任务名称
+    status: TaskStatus  # 任务状态
+    start_time: datetime | None  # 开始时间
+    register_time: datetime | None  # 注册时间
 
 
 class FailedConnectorIndexingStatus(BaseModel):
-    """Simplified version of ConnectorIndexingStatus for failed indexing attempts"""
-
-    cc_pair_id: int
-    name: str | None
-    error_msg: str | None
-    is_deletable: bool
-    connector_id: int
-    credential_id: int
+    """
+    失败的连接器索引状态模型
+    简化版的ConnectorIndexingStatus,用于记录失败的索引尝试
+    Simplified version of ConnectorIndexingStatus for failed indexing attempts
+    """
+    cc_pair_id: int  # 连接器-凭证对ID
+    name: str | None  # 名称
+    error_msg: str | None  # 错误信息
+    is_deletable: bool  # 是否可删除
+    connector_id: int  # 连接器ID
+    credential_id: int  # 凭证ID
 
 
 class ConnectorIndexingStatus(BaseModel):
-    """Represents the latest indexing status of a connector"""
-
-    cc_pair_id: int
-    name: str | None
-    cc_pair_status: ConnectorCredentialPairStatus
-    connector: ConnectorSnapshot
-    credential: CredentialSnapshot
-    owner: str
-    groups: list[int]
-    access_type: AccessType
-    last_finished_status: IndexingStatus | None
-    last_status: IndexingStatus | None
-    last_success: datetime | None
-    docs_indexed: int
-    error_msg: str | None
-    latest_index_attempt: IndexAttemptSnapshot | None
-    deletion_attempt: DeletionAttemptSnapshot | None
-    is_deletable: bool
-
+    """
+    连接器索引状态模型
+    表示连接器的最新索引状态
+    Represents the latest indexing status of a connector
+    """
+    cc_pair_id: int  # 连接器-凭证对ID
+    name: str | None  # 名称
+    cc_pair_status: ConnectorCredentialPairStatus  # 配对状态
+    connector: ConnectorSnapshot  # 连接器快照
+    credential: CredentialSnapshot  # 凭证快照
+    owner: str  # 所有者
+    groups: list[int]  # 组列表
+    access_type: AccessType  # 访问类型
+    last_finished_status: IndexingStatus | None  # 最后完成状态
+    last_status: IndexingStatus | None  # 最后状态
+    last_success: datetime | None  # 最后成功时间
+    docs_indexed: int  # 已索引文档数
+    error_msg: str | None  # 错误信息
+    latest_index_attempt: IndexAttemptSnapshot | None  # 最新索引尝试
+    deletion_attempt: DeletionAttemptSnapshot | None  # 删除尝试
+    is_deletable: bool  # 是否可删除
+    
     # index attempt in db can be marked successful while celery/redis
     # is stil running/cleaning up
-    in_progress: bool
+    # 数据库中的索引尝试可能被标记为成功,而Celery/Redis仍在运行/清理中
+    in_progress: bool  # 是否正在进行中
 
 
 class ConnectorCredentialPairIdentifier(BaseModel):
-    connector_id: int
-    credential_id: int
+    """连接器-凭证对标识符模型"""
+    connector_id: int  # 连接器ID
+    credential_id: int  # 凭证ID
 
 
 class ConnectorCredentialPairMetadata(BaseModel):
-    name: str | None = None
-    access_type: AccessType
-    auto_sync_options: dict[str, Any] | None = None
-    groups: list[int] = Field(default_factory=list)
+    """连接器-凭证对元数据模型"""
+    name: str | None = None  # 名称
+    access_type: AccessType  # 访问类型
+    auto_sync_options: dict[str, Any] | None = None  # 自动同步选项
+    groups: list[int] = Field(default_factory=list)  # 组列表
 
 
 class CCStatusUpdateRequest(BaseModel):
-    status: ConnectorCredentialPairStatus
+    """连接器-凭证对状态更新请求"""
+    status: ConnectorCredentialPairStatus  # 更新后的状态
 
 
 class ConnectorCredentialPairDescriptor(BaseModel):
-    id: int
-    name: str | None = None
-    connector: ConnectorSnapshot
-    credential: CredentialSnapshot
+    """连接器-凭证对描述符模型"""
+    id: int  # 配对ID
+    name: str | None = None  # 配对名称
+    connector: ConnectorSnapshot  # 连接器快照
+    credential: CredentialSnapshot  # 凭证快照
 
 
 class RunConnectorRequest(BaseModel):
-    connector_id: int
-    credential_ids: list[int] | None = None
-    from_beginning: bool = False
+    """运行连接器请求模型"""
+    connector_id: int  # 连接器ID
+    credential_ids: list[int] | None = None  # 凭证ID列表
+    from_beginning: bool = False  # 是否从头开始
 
 
 class CCPropertyUpdateRequest(BaseModel):
-    name: str
-    value: str
+    """连接器-凭证对属性更新请求"""
+    name: str  # 属性名
+    value: str  # 属性值
 
 
 """Connectors Models"""
 
 
 class GoogleAppWebCredentials(BaseModel):
-    client_id: str
-    project_id: str
-    auth_uri: str
-    token_uri: str
-    auth_provider_x509_cert_url: str
-    client_secret: str
-    redirect_uris: list[str]
-    javascript_origins: list[str]
+    """Google应用Web凭证模型"""
+    client_id: str  # 客户端ID
+    project_id: str  # 项目ID
+    auth_uri: str  # 认证URI
+    token_uri: str  # 令牌URI
+    auth_provider_x509_cert_url: str  # 认证提供者证书URL
+    client_secret: str  # 客户端密钥
+    redirect_uris: list[str]  # 重定向URI列表
+    javascript_origins: list[str]  # JavaScript源列表
 
 
 class GoogleAppCredentials(BaseModel):
-    web: GoogleAppWebCredentials
+    """Google应用凭证模型"""
+    web: GoogleAppWebCredentials  # Web凭证信息
 
 
 class GoogleServiceAccountKey(BaseModel):
-    type: str
-    project_id: str
-    private_key_id: str
-    private_key: str
-    client_email: str
-    client_id: str
-    auth_uri: str
-    token_uri: str
-    auth_provider_x509_cert_url: str
-    client_x509_cert_url: str
-    universe_domain: str
+    """Google服务账号密钥模型"""
+    type: str  # 类型
+    project_id: str  # 项目ID
+    private_key_id: str  # 私钥ID
+    private_key: str  # 私钥
+    client_email: str  # 客户端邮箱
+    client_id: str  # 客户端ID
+    auth_uri: str  # 认证URI
+    token_uri: str  # 令牌URI
+    auth_provider_x509_cert_url: str  # 认证提供者证书URL
+    client_x509_cert_url: str  # 客户端证书URL
+    universe_domain: str  # 域名
 
 
 class GoogleServiceAccountCredentialRequest(BaseModel):
@@ -403,27 +495,33 @@ class GoogleServiceAccountCredentialRequest(BaseModel):
 
 
 class FileUploadResponse(BaseModel):
-    file_paths: list[str]
+    """文件上传响应模型"""
+    file_paths: list[str]  # 上传文件路径列表
 
 
 class ObjectCreationIdResponse(BaseModel):
-    id: int | str
-    credential: CredentialSnapshot | None = None
+    """对象创建ID响应模型"""
+    id: int | str  # 创建的对象ID
+    credential: CredentialSnapshot | None = None  # 关联的凭证快照
 
 
 class AuthStatus(BaseModel):
-    authenticated: bool
+    """认证状态模型"""
+    authenticated: bool  # 是否已认证
 
 
 class AuthUrl(BaseModel):
-    auth_url: str
+    """认证URL模型"""
+    auth_url: str  # 认证URL
 
 
 class GmailCallback(BaseModel):
-    state: str
-    code: str
+    """Gmail回调模型"""
+    state: str  # 状态
+    code: str  # 授权码
 
 
 class GDriveCallback(BaseModel):
-    state: str
-    code: str
+    """Google Drive回调模型"""
+    state: str  # 状态
+    code: str  # 授权码

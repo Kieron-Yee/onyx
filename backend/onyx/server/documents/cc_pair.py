@@ -1,3 +1,13 @@
+"""
+这个模块包含了连接器凭据对(CC Pair)相关的API路由和处理函数。
+主要功能包括:
+1. CC Pair的状态管理
+2. 索引尝试的查询
+3. 权限同步
+4. 文档同步状态查询
+5. 连接器和凭据的关联管理
+"""
+
 from datetime import datetime
 from http import HTTPStatus
 
@@ -65,6 +75,19 @@ def get_cc_pair_index_attempts(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> PaginatedReturn[IndexAttemptSnapshot]:
+    """
+    获取指定CC Pair的索引尝试记录
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        page: 页码(从1开始)
+        page_size: 每页记录数(1-1000)
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        包含索引尝试记录的分页数据
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id, db_session, user, get_editable=False
     )
@@ -98,6 +121,18 @@ def get_cc_pair_full_info(
     db_session: Session = Depends(get_session),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> CCPairFullInfo:
+    """
+    获取CC Pair的完整信息
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    返回:
+        CC Pair的详细信息，包括状态、文档数量、最新索引尝试等
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id, db_session, user, get_editable=False
     )
@@ -164,13 +199,29 @@ def update_cc_pair_status(
     db_session: Session = Depends(get_session),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> JSONResponse:
-    """This method may wait up to 30 seconds if pausing the connector due to the need to
+    """
+    更新CC Pair的状态
+    
+    This method may wait up to 30 seconds if pausing the connector due to the need to
     terminate tasks in progress. Tasks are not guaranteed to terminate within the
     timeout.
+    如果需要暂停连接器，此方法可能会等待最多30秒以终止正在进行的任务。不能保证任务在超时时间内终止。
 
     Returns HTTPStatus.OK if everything finished.
     Returns HTTPStatus.ACCEPTED if the connector is being paused, but background tasks
     did not finish within the timeout.
+    如果所有操作都完成则返回HTTPStatus.OK
+    如果连接器正在暂停但后台任务在超时前未完成则返回HTTPStatus.ACCEPTED
+
+    参数:
+        cc_pair_id: CC Pair的ID
+        status_update_request: 状态更新请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    返回:
+        JSON响应，包含操作结果
     """
     WAIT_TIMEOUT = 15.0
     still_terminating = False
@@ -284,6 +335,18 @@ def update_cc_pair_name(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse[int]:
+    """
+    更新CC Pair的名称
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        new_name: 新的名称
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        包含更新结果的状态响应
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -313,6 +376,18 @@ def update_cc_pair_property(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse[int]:
+    """
+    更新CC Pair的属性
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        update_request: 属性更新请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        包含更新结果的状态响应
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -352,6 +427,17 @@ def get_cc_pair_last_pruned(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> datetime | None:
+    """
+    获取CC Pair最后一次清理的时间
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        最后一次清理的时间戳，如果从未清理则返回None
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -374,8 +460,21 @@ def prune_cc_pair(
     db_session: Session = Depends(get_session),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> StatusResponse[list[int]]:
-    """Triggers pruning on a particular cc_pair immediately"""
+    """
+    触发对特定CC Pair的立即清理
+    
+    Triggers pruning on a particular cc_pair immediately
+    对特定CC Pair立即触发清理操作
 
+    参数:
+        cc_pair_id: CC Pair的ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    返回:
+        包含清理任务创建结果的状态响应
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -424,6 +523,17 @@ def get_cc_pair_latest_sync(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> datetime | None:
+    """
+    获取CC Pair最后一次权限同步的时间
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        最后一次权限同步的时间戳，如果从未同步则返回None
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -446,8 +556,21 @@ def sync_cc_pair(
     db_session: Session = Depends(get_session),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> StatusResponse[list[int]]:
-    """Triggers permissions sync on a particular cc_pair immediately"""
+    """
+    触发对特定CC Pair的立即权限同步
+    
+    Triggers permissions sync on a particular cc_pair immediately
+    对特定CC Pair立即触发权限同步操作
 
+    参数:
+        cc_pair_id: CC Pair的ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    返回:
+        包含权限同步任务创建结果的状态响应
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id,
         db_session=db_session,
@@ -463,7 +586,7 @@ def sync_cc_pair(
     r = get_redis_client(tenant_id=tenant_id)
 
     redis_connector = RedisConnector(tenant_id, cc_pair_id)
-    if redis_connector.permissions.fenced:
+    if (redis_connector.permissions.fenced):
         raise HTTPException(
             status_code=HTTPStatus.CONFLICT,
             detail="Doc permissions sync task already in progress.",
@@ -496,6 +619,17 @@ def get_docs_sync_status(
     _: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[DocumentSyncStatus]:
+    """
+    获取CC Pair下所有文档的同步状态
+    
+    参数:
+        cc_pair_id: CC Pair的ID
+        _: 当前用户对象(未使用)
+        db_session: 数据库会话
+        
+    返回:
+        文档同步状态列表
+    """
     all_docs_for_cc_pair = get_documents_for_cc_pair(
         db_session=db_session,
         cc_pair_id=cc_pair_id,
@@ -511,6 +645,19 @@ def associate_credential_to_connector(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse[int]:
+    """
+    将凭据关联到连接器
+    
+    参数:
+        connector_id: 连接器ID
+        credential_id: 凭据ID
+        metadata: CC Pair元数据
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        包含关联操作结果的状态响应
+    """
     fetch_ee_implementation_or_noop(
         "onyx.db.user_group", "validate_object_creation_for_user", None
     )(
@@ -546,6 +693,18 @@ def dissociate_credential_from_connector(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse[int]:
+    """
+    解除连接器和凭据的关联
+    
+    参数:
+        connector_id: 连接器ID
+        credential_id: 凭据ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        包含解除关联操作结果的状态响应
+    """
     return remove_credential_from_connector(
         connector_id, credential_id, user, db_session
     )

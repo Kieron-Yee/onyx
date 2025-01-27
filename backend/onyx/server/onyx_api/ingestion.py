@@ -1,3 +1,12 @@
+"""
+此文件实现了文档摄取(Ingestion)相关的API接口，主要功能包括：
+1. 获取连接器凭证对(connector-credential pair)相关的文档
+2. 获取和更新摄取文档
+3. 处理文档索引和嵌入
+
+该模块提供了RESTful API接口，用于管理和处理文档的摄取过程。
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -28,6 +37,7 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 # not using /api to avoid confusion with nginx api path routing
+# 不使用 /api 前缀以避免与nginx的api路由混淆
 router = APIRouter(prefix="/onyx-api")
 
 
@@ -37,6 +47,17 @@ def get_docs_by_connector_credential_pair(
     _: User | None = Depends(api_key_dep),
     db_session: Session = Depends(get_session),
 ) -> list[DocMinimalInfo]:
+    """
+    获取指定连接器凭证对的所有文档信息
+    
+    参数:
+        cc_pair_id: 连接器凭证对ID
+        _: 用户认证依赖
+        db_session: 数据库会话
+    
+    返回:
+        包含文档基本信息的列表
+    """
     db_docs = get_documents_by_cc_pair(cc_pair_id=cc_pair_id, db_session=db_session)
     return [
         DocMinimalInfo(
@@ -53,6 +74,16 @@ def get_ingestion_docs(
     _: User | None = Depends(api_key_dep),
     db_session: Session = Depends(get_session),
 ) -> list[DocMinimalInfo]:
+    """
+    获取所有待摄取的文档列表
+    
+    参数:
+        _: 用户认证依赖
+        db_session: 数据库会话
+    
+    返回:
+        包含待摄取文档基本信息的列表
+    """
     db_docs = get_ingestion_documents(db_session)
     return [
         DocMinimalInfo(
@@ -71,11 +102,28 @@ def upsert_ingestion_doc(
     db_session: Session = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant_id),
 ) -> IngestionResult:
+    """
+    更新或插入待摄取的文档
+    
+    参数:
+        doc_info: 文档信息
+        _: 用户认证依赖
+        db_session: 数据库会话
+        tenant_id: 租户ID
+    
+    返回:
+        摄取结果，包含文档ID和是否为新文档的信息
+    
+    异常:
+        HTTPException: 当指定的连接器凭证对不存在时抛出400错误
+        RuntimeError: 当存在次要索引但未配置搜索设置时抛出
+    """
     doc_info.document.from_ingestion_api = True
 
     document = Document.from_base(doc_info.document)
 
     # TODO once the frontend is updated with this enum, remove this logic
+    # TODO 一旦前端更新了这个枚举，移除这个逻辑
     if document.source == DocumentSource.INGESTION_API:
         document.source = DocumentSource.FILE
 
@@ -125,8 +173,10 @@ def upsert_ingestion_doc(
 
         if sec_search_settings is None:
             # Should not ever happen
+            # 这种情况不应该发生
             raise RuntimeError(
                 "Secondary index exists but no search settings configured"
+                # "存在次要索引但没有配置搜索设置"
             )
 
         new_index_embedding_model = DefaultIndexingEmbedder.from_db_search_settings(

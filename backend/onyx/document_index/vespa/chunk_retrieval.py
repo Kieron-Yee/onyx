@@ -1,3 +1,11 @@
+"""
+此模块主要负责从Vespa搜索引擎中检索和处理文档块(chunks)。
+主要功能包括：
+- 文档块的检索和处理
+- Vespa搜索结果的转换
+- 批量检索和并行检索操作
+"""
+
 import json
 import string
 from collections.abc import Callable
@@ -55,6 +63,16 @@ logger = setup_logger()
 def _process_dynamic_summary(
     dynamic_summary: str, max_summary_length: int = 400
 ) -> list[str]:
+    """
+    处理动态摘要，将其切分并限制长度。
+
+    参数:
+        dynamic_summary: 需要处理的动态摘要字符串
+        max_summary_length: 最大摘要长度，默认400字符
+
+    返回:
+        list[str]: 处理后的摘要片段列表
+    """
     if not dynamic_summary:
         return []
 
@@ -62,20 +80,25 @@ def _process_dynamic_summary(
     processed_summary: list[str] = []
     for summary_section in dynamic_summary.split("<sep />"):
         # if we're past the desired max length, break at the last word
+        # 如果超过了期望的最大长度，在最后一个单词处截断
         if current_length + len(summary_section) >= max_summary_length:
             summary_section = summary_section[: max_summary_length - current_length]
             summary_section = summary_section.lstrip()  # remove any leading whitespace
+                                                      # 删除任何前导空格
 
             # handle the case where the truncated section is either just a
             # single (partial) word or if it's empty
+            # 处理截断部分只有一个（不完整的）单词或为空的情况
             first_space = summary_section.find(" ")
             if first_space == -1:
                 # add ``...`` to previous section
+                # 在前一个部分添加 ``...``
                 if processed_summary:
                     processed_summary[-1] += "..."
                 break
 
             # handle the valid truncated section case
+            # 处理有效的截断部分的情况
             summary_section = summary_section.rsplit(" ", 1)[0]
             if summary_section[-1] in string.punctuation:
                 summary_section = summary_section[:-1]
@@ -92,6 +115,16 @@ def _process_dynamic_summary(
 def _vespa_hit_to_inference_chunk(
     hit: dict[str, Any], null_score: bool = False
 ) -> InferenceChunkUncleaned:
+    """
+    将Vespa搜索结果转换为推理块对象。
+
+    参数:
+        hit: Vespa返回的搜索结果字典
+        null_score: 是否将分数设置为空，默认为False
+
+    返回:
+        InferenceChunkUncleaned: 转换后的推理块对象
+    """
     fields = cast(dict[str, Any], hit["fields"])
 
     # parse fields that are stored as strings, but are really json / datetime
@@ -153,11 +186,27 @@ def _get_chunks_via_visit_api(
     field_names: list[str] | None = None,
     get_large_chunks: bool = False,
 ) -> list[dict]:
+    """
+    通过Vespa的Visit API获取文档块。
+
+    参数:
+        chunk_request: 文档块请求对象
+        index_name: 索引名称
+        filters: 索引过滤条件
+        field_names: 需要获取的字段名列表
+        get_large_chunks: 是否获取大型块，默认False
+
+    返回:
+        list[dict]: 检索到的文档块列表
+    """
     # Constructing the URL for the Visit API
+    # 构建Visit API的URL
     # NOTE: visit API uses the same URL as the document API, but with different params
+    # 注意：visit API使用与document API相同的URL，但参数不同
     url = DOCUMENT_ID_ENDPOINT.format(index_name=index_name)
 
     # build the list of fields to retrieve
+    # 构建需要检索的字段列表
     field_set_list = (
         None
         if not field_names
@@ -173,6 +222,7 @@ def _get_chunks_via_visit_api(
     field_set = ",".join(field_set_list) if field_set_list else None
 
     # build filters
+    # 构建过滤器
     selection = f"{index_name}.document_id=='{chunk_request.document_id}'"
 
     if chunk_request.is_capped:
@@ -182,9 +232,12 @@ def _get_chunks_via_visit_api(
         selection += f" and {index_name}.large_chunk_reference_ids == null"
 
     # Setting up the selection criteria in the query parameters
+    # 在查询参数中设置选择条件
     params = {
         # NOTE: Document Selector Language doesn't allow `contains`, so we can't check
         # for the ACL in the selection. Instead, we have to check as a postfilter
+        # 注意：Document Selector Language不支持`contains`，所以我们无法在selection中检查ACL。
+        # 相反，我们必须在后过滤器中检查
         "selection": selection,
         "continuation": None,
         "wantedDocumentCount": 1_000,
@@ -210,6 +263,7 @@ def _get_chunks_via_visit_api(
             raise httpx.HTTPError(error_base) from e
 
         # Check if the response contains any documents
+        # 检查响应是否包含任何文档
         response_data = response.json()
         if "documents" in response_data:
             for document in response_data["documents"]:
@@ -223,6 +277,7 @@ def _get_chunks_via_visit_api(
                 document_chunks.append(document)
 
         # Check for continuation token to handle pagination
+        # 检查continuation token以处理分页
         if "continuation" in response_data and response_data["continuation"]:
             params["continuation"] = response_data["continuation"]
         else:
@@ -238,6 +293,18 @@ def get_all_vespa_ids_for_document_id(
     filters: IndexFilters | None = None,
     get_large_chunks: bool = False,
 ) -> list[str]:
+    """
+    获取指定文档ID对应的所有Vespa ID。
+
+    参数:
+        document_id: 文档ID
+        index_name: 索引名称
+        filters: 过滤条件，可选
+        get_large_chunks: 是否获取大型块，默认False
+
+    返回:
+        list[str]: Vespa ID列表
+    """
     document_chunks = _get_chunks_via_visit_api(
         chunk_request=VespaChunkRequest(document_id=document_id),
         index_name=index_name,
@@ -254,6 +321,18 @@ def parallel_visit_api_retrieval(
     filters: IndexFilters,
     get_large_chunks: bool = False,
 ) -> list[InferenceChunkUncleaned]:
+    """
+    并行执行Visit API检索操作。
+
+    参数:
+        index_name: 索引名称
+        chunk_requests: 块请求列表
+        filters: 过滤条件
+        get_large_chunks: 是否获取大型块，默认False
+
+    返回:
+        list[InferenceChunkUncleaned]: 检索到的推理块列表
+    """
     functions_with_args: list[tuple[Callable, tuple]] = [
         (
             _get_chunks_via_visit_api,
@@ -285,6 +364,19 @@ def parallel_visit_api_retrieval(
 def query_vespa(
     query_params: Mapping[str, str | int | float]
 ) -> list[InferenceChunkUncleaned]:
+    """
+    执行Vespa查询。
+
+    参数:
+        query_params: 查询参数映射
+
+    返回:
+        list[InferenceChunkUncleaned]: 查询结果的推理块列表
+
+    异常:
+        ValueError: 当查询为空时
+        httpx.HTTPError: 当查询失败时
+    """
     if "query" in query_params and not cast(str, query_params["query"]).strip():
         raise ValueError("No/empty query received")
 
@@ -337,6 +429,7 @@ def query_vespa(
 
     inference_chunks = [_vespa_hit_to_inference_chunk(hit) for hit in filtered_hits]
     # Good Debugging Spot
+    # 这是一个适合调试的位置
     return inference_chunks
 
 
@@ -346,6 +439,18 @@ def _get_chunks_via_batch_search(
     filters: IndexFilters,
     get_large_chunks: bool = False,
 ) -> list[InferenceChunkUncleaned]:
+    """
+    通过批量搜索获取文档块。
+
+    参数:
+        index_name: 索引名称
+        chunk_requests: 块请求列表
+        filters: 过滤条件
+        get_large_chunks: 是否获取大型块，默认False
+
+    返回:
+        list[InferenceChunkUncleaned]: 检索到的推理块列表
+    """
     if not chunk_requests:
         return []
 
@@ -380,13 +485,31 @@ def batch_search_api_retrieval(
     filters: IndexFilters,
     get_large_chunks: bool = False,
 ) -> list[InferenceChunkUncleaned]:
+    """
+    执行批量搜索API检索。
+    
+    将请求分为有上限和无上限两类进行处理：
+    - 有上限的请求使用批量搜索API
+    - 无上限的请求使用并行Visit API
+
+    参数:
+        index_name: 索引名称
+        chunk_requests: 块请求列表
+        filters: 过滤条件
+        get_large_chunks: 是否获取大型块，默认False
+
+    返回:
+        list[InferenceChunkUncleaned]: 检索到的推理块列表
+    """
     retrieved_chunks: list[InferenceChunkUncleaned] = []
     capped_requests: list[VespaChunkRequest] = []
     uncapped_requests: list[VespaChunkRequest] = []
     chunk_count = 0
     for req_ind, request in enumerate(chunk_requests, start=1):
         # All requests without a chunk range are uncapped
+        # 所有没有块范围的请求都是无上限的
         # Uncapped requests are retrieved using the Visit API
+        # 无上限的请求使用Visit API检索
         range = request.range
         if range is None:
             uncapped_requests.append(request)

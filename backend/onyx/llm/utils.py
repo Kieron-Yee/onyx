@@ -1,3 +1,12 @@
+"""
+这个文件包含了与LLM(大语言模型)交互相关的工具函数。
+主要功能包括:
+- 异常处理和错误消息转换
+- 消息内容处理和格式化
+- token计数和限制处理
+- 模型配置和参数管理
+"""
+
 import copy
 import json
 from collections.abc import Callable
@@ -52,6 +61,18 @@ def litellm_exception_to_error_msg(
     custom_error_msg_mappings: dict[str, str]
     | None = LITELLM_CUSTOM_ERROR_MESSAGE_MAPPINGS,
 ) -> str:
+    """
+    将LiteLLM的异常转换为用户友好的错误消息。
+
+    参数:
+        e: 需要处理的异常
+        llm: LLM实例
+        fallback_to_error_msg: 是否返回原始错误消息
+        custom_error_msg_mappings: 自定义错误消息映射
+
+    返回:
+        格式化后的错误消息字符串
+    """
     error_msg = str(e)
 
     if custom_error_msg_mappings:
@@ -112,7 +133,16 @@ def _build_content(
     message: str,
     files: list[InMemoryChatFile] | None = None,
 ) -> str:
-    """Applies all non-image files."""
+    """
+    将非图片文件的内容与消息组合。
+    
+    参数:
+        message: 原始消息
+        files: 需要处理的文件列表
+        
+    返回:
+        处理后的消息内容
+    """
     if not files:
         return message
 
@@ -142,7 +172,20 @@ def build_content_with_imgs(
     img_urls: list[str] | None = None,
     b64_imgs: list[str] | None = None,
     message_type: MessageType = MessageType.USER,
-) -> str | list[str | dict[str, Any]]:  # matching Langchain's BaseMessage content type
+) -> str | list[str | dict[str, Any]]:
+    """
+    构建包含图片的消息内容。
+
+    参数:
+        message: 原始消息文本
+        files: 文件列表
+        img_urls: 图片URL列表
+        b64_imgs: Base64编码的图片列表
+        message_type: 消息类型
+
+    返回:
+        处理后的消息内容，可能是字符串或列表形式
+    """
     files = files or []
 
     # Only include image files for user messages
@@ -202,6 +245,15 @@ def build_content_with_imgs(
 
 
 def message_to_prompt_and_imgs(message: BaseMessage) -> tuple[str, list[str]]:
+    """
+    将消息转换为提示文本和图片列表。
+
+    参数:
+        message: 基础消息对象
+
+    返回:
+        包含提示文本和图片URL列表的元组
+    """
     if isinstance(message.content, str):
         return message.content, []
 
@@ -226,6 +278,15 @@ def message_to_prompt_and_imgs(message: BaseMessage) -> tuple[str, list[str]]:
 def dict_based_prompt_to_langchain_prompt(
     messages: list[dict[str, str]]
 ) -> list[BaseMessage]:
+    """
+    将字典格式的提示转换为Langchain格式的提示。
+
+    参数:
+        messages: 字典格式的消息列表
+
+    返回:
+        Langchain格式的消息列表
+    """
     prompt: list[BaseMessage] = []
     for message in messages:
         role = message.get("role")
@@ -246,10 +307,28 @@ def dict_based_prompt_to_langchain_prompt(
 
 
 def str_prompt_to_langchain_prompt(message: str) -> list[BaseMessage]:
+    """
+    将字符串格式的提示转换为Langchain格式的提示。
+
+    参数:
+        message: 字符串格式的消息
+
+    返回:
+        Langchain格式的消息列表
+    """
     return [HumanMessage(content=message)]
 
 
 def convert_lm_input_to_basic_string(lm_input: LanguageModelInput) -> str:
+    """
+    将语言模型输入转换为基础字符串。
+
+    参数:
+        lm_input: 语言模型输入
+
+    返回:
+        转换后的字符串
+    """
     """Heavily inspired by:
     https://github.com/langchain-ai/langchain/blob/master/libs/langchain/langchain/chat_models/base.py#L86
     """
@@ -271,6 +350,15 @@ def convert_lm_input_to_basic_string(lm_input: LanguageModelInput) -> str:
 
 
 def message_to_string(message: BaseMessage) -> str:
+    """
+    将消息对象转换为字符串。
+
+    参数:
+        message: 基础消息对象
+
+    返回:
+        消息内容字符串
+    """
     if not isinstance(message.content, str):
         raise RuntimeError("LLM message not in expected format.")
 
@@ -280,23 +368,51 @@ def message_to_string(message: BaseMessage) -> str:
 def message_generator_to_string_generator(
     messages: Iterator[BaseMessage],
 ) -> Iterator[str]:
+    """
+    将消息生成器转换为字符串生成器。
+
+    参数:
+        messages: 消息生成器
+
+    返回:
+        字符串生成器
+    """
     for message in messages:
         yield message_to_string(message)
 
 
 def should_be_verbose() -> bool:
+    """
+    检查日志级别是否为调试模式。
+
+    返回:
+        如果日志级别为调试模式，则返回True，否则返回False
+    """
     return LOG_LEVEL == "debug"
 
 
 # estimate of the number of tokens in an image url
 # is correct when downsampling is used. Is very wrong when OpenAI does not downsample
 # TODO: improve this
+# 图片URL中token数量的估计值
+# 在使用降采样时是正确的。当OpenAI不进行降采样时，这个估计值会非常不准确
+# TODO: 需要改进这个估计方法
 _IMG_TOKENS = 85
 
 
 def check_message_tokens(
     message: BaseMessage, encode_fn: Callable[[str], list] | None = None
 ) -> int:
+    """
+    检查消息中的token数量。
+
+    参数:
+        message: 基础消息对象
+        encode_fn: 编码函数
+
+    返回:
+        消息中的token数量
+    """
     if isinstance(message.content, str):
         return check_number_of_tokens(message.content, encode_fn)
 
@@ -324,6 +440,16 @@ def check_message_tokens(
 def check_number_of_tokens(
     text: str, encode_fn: Callable[[str], list] | None = None
 ) -> int:
+    """
+    获取文本中的token数量。
+
+    参数:
+        text: 文本内容
+        encode_fn: 编码函数
+
+    返回:
+        文本中的token数量
+    """
     """Gets the number of tokens in the provided text, using the provided encoding
     function. If none is provided, default to the tiktoken encoder used by GPT-3.5
     and GPT-4.
@@ -336,7 +462,17 @@ def check_number_of_tokens(
 
 
 def test_llm(llm: LLM) -> str | None:
+    """
+    测试LLM实例。
+
+    参数:
+        llm: LLM实例
+
+    返回:
+        如果测试失败，返回错误消息，否则返回None
+    """
     # try for up to 2 timeouts (e.g. 10 seconds in total)
+    # 最多尝试2次超时(例如总共10秒)
     error_msg = None
     for _ in range(2):
         try:
@@ -350,6 +486,12 @@ def test_llm(llm: LLM) -> str | None:
 
 
 def get_model_map() -> dict:
+    """
+    获取模型映射。
+
+    返回:
+        模型映射字典
+    """
     starting_map = copy.deepcopy(cast(dict, litellm.model_cost))
 
     # NOTE: we could add additional models here in the future,
@@ -358,37 +500,61 @@ def get_model_map() -> dict:
     # unlikely to be standard across users even for the same model
     # (it heavily depends on their hardware). For now, we'll just
     # rely on GEN_AI_MODEL_FALLBACK_MAX_TOKENS to cover this.
-    # for model_name in [
-    #     "llama3.2",
-    #     "llama3.2:1b",
-    #     "llama3.2:3b",
-    #     "llama3.2:11b",
-    #     "llama3.2:90b",
-    # ]:
-    #     starting_map[f"ollama/{model_name}"] = {
-    #         "max_tokens": 128000,
-    #         "max_input_tokens": 128000,
-    #         "max_output_tokens": 128000,
-    #     }
+    # 注意：我们将来可以在这里添加更多模型,
+    # 但现在没有这个必要。Ollama允许用户指定他们期望的最大上下文窗口,
+    # 即使是同一个模型,在不同用户之间也不太可能有标准值
+    # (这很大程度上取决于他们的硬件)。目前,我们只需要依靠
+    # GEN_AI_MODEL_FALLBACK_MAX_TOKENS来处理这种情况。
 
     return starting_map
 
 
 def _strip_extra_provider_from_model_name(model_name: str) -> str:
+    """
+    从模型名称中去除额外的提供者前缀。
+
+    参数:
+        model_name: 模型名称
+
+    返回:
+        去除额外提供者前缀的模型名称
+    """
     return model_name.split("/")[1] if "/" in model_name else model_name
 
 
 def _strip_colon_from_model_name(model_name: str) -> str:
+    """
+    从模型名称中去除冒号及其后缀。
+
+    参数:
+        model_name: 模型名称
+
+    返回:
+        去除冒号及其后缀的模型名称
+    """
     return ":".join(model_name.split(":")[:-1]) if ":" in model_name else model_name
 
 
 def _find_model_obj(
     model_map: dict, provider: str, model_names: list[str | None]
 ) -> dict | None:
+    """
+    在模型映射中查找模型对象。
+
+    参数:
+        model_map: 模型映射字典
+        provider: 模型提供者
+        model_names: 模型名称列表
+
+    返回:
+        模型对象字典，如果未找到则返回None
+    """
     # Filter out None values and deduplicate model names
+    # 过滤掉None值并对模型名称去重
     filtered_model_names = [name for name in model_names if name]
 
     # First try all model names with provider prefix
+    # 首先尝试所有带有提供者前缀的模型名称
     for model_name in filtered_model_names:
         model_obj = model_map.get(f"{provider}/{model_name}")
         if model_obj:
@@ -396,6 +562,7 @@ def _find_model_obj(
             return model_obj
 
     # Then try all model names without provider prefix
+    # 然后尝试所有不带提供者前缀的模型名称
     for model_name in filtered_model_names:
         model_obj = model_map.get(model_name)
         if model_obj:
@@ -410,9 +577,21 @@ def get_llm_max_tokens(
     model_name: str,
     model_provider: str,
 ) -> int:
+    """
+    获取LLM的最大token数量。
+
+    参数:
+        model_map: 模型映射字典
+        model_name: 模型名称
+        model_provider: 模型提供者
+
+    返回:
+        最大token数量
+    """
     """Best effort attempt to get the max tokens for the LLM"""
     if GEN_AI_MAX_TOKENS:
         # This is an override, so always return this
+        # 这是一个覆盖设置，所以始终返回这个值
         logger.info(f"Using override GEN_AI_MAX_TOKENS: {GEN_AI_MAX_TOKENS}")
         return GEN_AI_MAX_TOKENS
 
@@ -427,8 +606,10 @@ def get_llm_max_tokens(
                 model_name,
                 # Remove leading extra provider. Usually for cases where user has a
                 # customer model proxy which appends another prefix
+                # 移除开头的额外提供者。通常用于用户有添加了其他前缀的自定义模型代理的情况
                 extra_provider_stripped_model_name,
                 # remove :XXXX from the end, if present. Needed for ollama.
+                # 如果存在，移除末尾的:XXXX。这对ollama是必需的
                 _strip_colon_from_model_name(model_name),
                 _strip_colon_from_model_name(extra_provider_stripped_model_name),
             ],
@@ -464,6 +645,17 @@ def get_llm_max_output_tokens(
     model_name: str,
     model_provider: str,
 ) -> int:
+    """
+    获取LLM的最大输出token数量。
+
+    参数:
+        model_map: 模型映射字典
+        model名称: 模型名称
+        model_provider: 模型提供者
+
+    返回:
+        最大输出token数量
+    """
     """Best effort attempt to get the max output tokens for the LLM"""
     try:
         model_obj = model_map.get(f"{model_provider}/{model_name}")
@@ -479,6 +671,7 @@ def get_llm_max_output_tokens(
             return max_output_tokens
 
         # Fallback to a fraction of max_tokens if max_output_tokens is not specified
+        # 如果未指定max_output_tokens，则回退到max_tokens的一个比例值
         if "max_tokens" in model_obj:
             max_output_tokens = int(model_obj["max_tokens"] * 0.1)
             logger.info(
@@ -502,11 +695,26 @@ def get_max_input_tokens(
     model_provider: str,
     output_tokens: int = GEN_AI_NUM_RESERVED_OUTPUT_TOKENS,
 ) -> int:
+    """
+    获取LLM的最大输入token数量。
+
+    参数:
+        model_name: 模型名称
+        model_provider: 模型提供者
+        output_tokens: 预留的输出token数量
+
+    返回:
+        最大输入token数量
+    """
     # NOTE: we previously used `litellm.get_max_tokens()`, but despite the name, this actually
     # returns the max OUTPUT tokens. Under the hood, this uses the `litellm.model_cost` dict,
     # and there is no other interface to get what we want. This should be okay though, since the
     # `model_cost` dict is a named public interface:
     # https://litellm.vercel.app/docs/completion/token_usage#7-model_cost
+    # 注意：我们之前使用了`litellm.get_max_tokens()`，但尽管名字如此，它实际上
+    # 返回的是最大输出tokens。在底层，它使用的是`litellm.model_cost`字典，
+    # 而且没有其他接口可以获取我们想要的内容。不过这应该没问题，因为
+    # `model_cost`字典是一个命名的公共接口
     # model_map is  litellm.model_cost
     litellm_model_map = get_model_map()
 

@@ -1,3 +1,12 @@
+"""
+该模块实现了OpenAI Assistants API中的消息相关接口
+主要功能包括：
+- 创建新消息
+- 获取消息列表
+- 获取单个消息
+- 修改消息元数据
+"""
+
 import uuid
 from datetime import datetime
 from typing import Any
@@ -29,11 +38,33 @@ Role = Literal["user", "assistant"]
 
 
 class MessageContent(BaseModel):
+    """
+    消息内容模型
+    
+    属性:
+        type: 消息类型，目前仅支持文本类型
+        text: 消息文本内容
+    """
     type: Literal["text"]
     text: str
 
 
 class Message(BaseModel):
+    """
+    消息模型
+    
+    属性:
+        id: 消息唯一标识符
+        object: 对象类型，固定为"thread.message"
+        created_at: 消息创建时间戳
+        thread_id: 会话线程ID
+        role: 消息角色（用户或助手）
+        content: 消息内容列表
+        file_ids: 关联的文件ID列表
+        assistant_id: 助手ID（可选）
+        run_id: 运行ID（可选）
+        metadata: 元数据字典（可选）
+    """
     id: str = Field(default_factory=lambda: f"msg_{uuid.uuid4()}")
     object: Literal["thread.message"] = "thread.message"
     created_at: int = Field(default_factory=lambda: int(datetime.now().timestamp()))
@@ -47,6 +78,15 @@ class Message(BaseModel):
 
 
 class CreateMessageRequest(BaseModel):
+    """
+    创建消息请求模型
+    
+    属性:
+        role: 消息角色
+        content: 消息内容
+        file_ids: 关联的文件ID列表
+        metadata: 元数据字典（可选）
+    """
     role: Role
     content: str
     file_ids: list[str] = []
@@ -54,6 +94,16 @@ class CreateMessageRequest(BaseModel):
 
 
 class ListMessagesResponse(BaseModel):
+    """
+    消息列表响应模型
+    
+    属性:
+        object: 对象类型，固定为"list"
+        data: 消息列表
+        first_id: 第一条消息ID
+        last_id: 最后一条消息ID
+        has_more: 是否还有更多消息
+    """
     object: Literal["list"] = "list"
     data: list[Message]
     first_id: str
@@ -68,6 +118,21 @@ def create_message(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> Message:
+    """
+    创建新消息
+    
+    参数:
+        thread_id: 会话线程ID
+        message: 创建消息的请求数据
+        user: 当前用户（可选）
+        db_session: 数据库会话
+    
+    返回:
+        Message: 创建的消息对象
+    
+    异常:
+        HTTPException: 当会话未找到时抛出404错误
+    """
     user_id = user.id if user else None
 
     try:
@@ -122,6 +187,24 @@ def list_messages(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ListMessagesResponse:
+    """
+    获取消息列表
+    
+    参数:
+        thread_id: 会话线程ID
+        limit: 返回消息的最大数量，默认20条
+        order: 排序方式，"asc"升序或"desc"降序
+        after: 获取在此ID之后的消息（可选）
+        before: 获取在此ID之前的消息（可选）
+        user: 当前用户（可选）
+        db_session: 数据库会话
+    
+    返回:
+        ListMessagesResponse: 消息列表响应
+    
+    异常:
+        HTTPException: 当会话未找到时抛出404错误
+    """
     user_id = user.id if user else None
 
     try:
@@ -177,6 +260,21 @@ def retrieve_message(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> Message:
+    """
+    获取单个消息
+    
+    参数:
+        thread_id: 会话线程ID
+        message_id: 消息ID
+        user: 当前用户（可选）
+        db_session: 数据库会话
+    
+    返回:
+        Message: 消息对象
+    
+    异常:
+        HTTPException: 当消息未找到时抛出404错误
+    """
     user_id = user.id if user else None
 
     try:
@@ -198,6 +296,12 @@ def retrieve_message(
 
 
 class ModifyMessageRequest(BaseModel):
+    """
+    修改消息请求模型
+    
+    属性:
+        metadata: 更新的元数据字典
+    """
     metadata: dict
 
 
@@ -209,6 +313,22 @@ def modify_message(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> Message:
+    """
+    修改消息元数据
+    
+    参数:
+        thread_id: 会话线程ID
+        message_id: 消息ID
+        request: 修改消息的请求数据
+        user: 当前用户（可选）
+        db_session: 数据库会话
+    
+    返回:
+        Message: 更新后的消息对象
+    
+    异常:
+        HTTPException: 当消息未找到时抛出404错误
+    """
     user_id = user.id if user else None
 
     try:

@@ -37,9 +37,25 @@ _ADDITIONAL_KWARGS_KEY = "additional_kwargs"
 # Cache for OAuth connectors, populated at module load time
 _OAUTH_CONNECTORS: dict[DocumentSource, type[OAuthConnector]] = {}
 
+"""
+This module implements the standard OAuth2.0 flow for document source authentication.
+此模块实现了文档源认证的标准OAuth2.0流程。
+
+主要功能：
+1. OAuth授权流程的初始化
+2. OAuth回调处理
+3. OAuth凭证管理
+4. OAuth连接器的动态发现
+"""
 
 def _discover_oauth_connectors() -> dict[DocumentSource, type[OAuthConnector]]:
-    """Walk through the connectors package to find all OAuthConnector implementations"""
+    """Walk through the connectors package to find all OAuthConnector implementations
+    遍历connectors包以查找所有OAuthConnector的实现
+    
+    返回值：
+        dict[DocumentSource, type[OAuthConnector]]: 包含所有OAuth连接器的字典，
+        键为文档源，值为对应的连接器类
+    """
     global _OAUTH_CONNECTORS
     if _OAUTH_CONNECTORS:  # Return cached connectors if already discovered
         return _OAUTH_CONNECTORS
@@ -59,8 +75,20 @@ _discover_oauth_connectors()
 def _get_additional_kwargs(
     request: Request, connector_cls: type[OAuthConnector], args_to_ignore: list[str]
 ) -> dict[str, str]:
-    # get additional kwargs from request
-    # e.g. anything except for desired_return_url
+    """
+    从请求中获取额外的关键字参数
+    
+    参数：
+        request: FastAPI请求对象
+        connector_cls: OAuth连接器类
+        args_to_ignore: 需要忽略的参数列表
+        
+    返回值：
+        dict[str, str]: 验证后的额外参数字典
+        
+    异常：
+        HTTPException: 当参数验证失败时抛出
+    """
     additional_kwargs_dict = {
         k: v for k, v in request.query_params.items() if k not in args_to_ignore
     }
@@ -80,6 +108,12 @@ def _get_additional_kwargs(
 
 
 class AuthorizeResponse(BaseModel):
+    """
+    OAuth授权响应模型
+    
+    属性：
+        redirect_url: str 重定向URL
+    """
     redirect_url: str
 
 
@@ -91,7 +125,19 @@ def oauth_authorize(
     _: User = Depends(current_user),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> AuthorizeResponse:
-    """Initiates the OAuth flow by redirecting to the provider's auth page"""
+    """Initiates the OAuth flow by redirecting to the provider's auth page
+    通过重定向到提供商的认证页面来初始化OAuth流程
+    
+    参数：
+        request: FastAPI请求对象
+        source: 文档源
+        desired_return_url: 期望的返回URL
+        _: 当前用户（用于认证）
+        tenant_id: 租户ID
+        
+    返回值：
+        AuthorizeResponse: 包含重定向URL的响应对象
+    """
     oauth_connectors = _discover_oauth_connectors()
 
     if source not in oauth_connectors:
@@ -130,6 +176,12 @@ def oauth_authorize(
 
 
 class CallbackResponse(BaseModel):
+    """
+    OAuth回调响应模型
+    
+    属性：
+        redirect_url: str 重定向URL
+    """
     redirect_url: str
 
 
@@ -142,7 +194,20 @@ def oauth_callback(
     user: User = Depends(current_user),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> CallbackResponse:
-    """Handles the OAuth callback and exchanges the code for tokens"""
+    """Handles the OAuth callback and exchanges the code for tokens
+    处理OAuth回调并用代码交换令牌
+    
+    参数：
+        source: 文档源
+        code: OAuth授权码
+        state: OAuth状态值
+        db_session: 数据库会话
+        user: 当前用户
+        tenant_id: 租户ID
+        
+    返回值：
+        CallbackResponse: 包含重定向URL的响应对象
+    """
     oauth_connectors = _discover_oauth_connectors()
 
     if source not in oauth_connectors:
@@ -189,12 +254,27 @@ def oauth_callback(
 
 
 class OAuthAdditionalKwargDescription(BaseModel):
+    """
+    OAuth额外参数描述模型
+    
+    属性：
+        name: 参数名
+        display_name: 显示名称
+        description: 参数描述
+    """
     name: str
     display_name: str
     description: str
 
 
 class OAuthDetails(BaseModel):
+    """
+    OAuth详情模型
+    
+    属性：
+        oauth_enabled: 是否启用OAuth
+        additional_kwargs: 额外参数列表
+    """
     oauth_enabled: bool
     additional_kwargs: list[OAuthAdditionalKwargDescription]
 
@@ -204,6 +284,16 @@ def oauth_details(
     source: DocumentSource,
     _: User = Depends(current_user),
 ) -> OAuthDetails:
+    """
+    获取OAuth源的详细信息
+    
+    参数：
+        source: 文档源
+        _: 当前用户（用于认证）
+        
+    返回值：
+        OAuthDetails: OAuth详情对象
+    """
     oauth_connectors = _discover_oauth_connectors()
 
     if source not in oauth_connectors:

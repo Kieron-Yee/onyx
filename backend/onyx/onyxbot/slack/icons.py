@@ -1,8 +1,23 @@
+"""
+此文件用于管理和提供不同文档来源的图标链接。
+主要功能是根据文档来源返回对应的 GitHub 图标图片链接。
+"""
+
 from onyx.configs.constants import DocumentSource
 
 
 def source_to_github_img_link(source: DocumentSource) -> str | None:
+    """
+    根据文档来源返回对应的 GitHub 图标图片链接。
+
+    Args:
+        source (DocumentSource): 文档来源枚举值，表示不同的文档来源类型
+        
+    Returns:
+        str | None: 返回对应文档来源的图标URL字符串，如果没有匹配的图标则返回默认文件图标
+    """
     # TODO: store these images somewhere better
+    # TODO: 需要找一个更好的位置存储这些图片
     if source == DocumentSource.WEB.value:
         return "https://raw.githubusercontent.com/onyx-dot-app/onyx/main/backend/slackbot_images/Web.png"
     if source == DocumentSource.FILE.value:
@@ -55,4 +70,5 @@ def source_to_github_img_link(source: DocumentSource) -> str | None:
     if source == DocumentSource.INGESTION_API.value:
         return "https://raw.githubusercontent.com/onyx-dot-app/onyx/main/backend/slackbot_images/File.png"
 
+    # 如果没有匹配的来源，返回默认的文件图标
     return "https://raw.githubusercontent.com/onyx-dot-app/onyx/main/backend/slackbot_images/File.png"

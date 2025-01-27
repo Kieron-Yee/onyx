@@ -1,3 +1,4 @@
+# 导入所需的库和依赖
 import threading
 import uuid
 from enum import Enum
@@ -28,6 +29,13 @@ _CACHED_INSTANCE_DOMAIN: str | None = None
 
 
 class RecordType(str, Enum):
+    """遥测记录类型枚举
+    VERSION: 版本信息
+    SIGN_UP: 注册信息 
+    USAGE: 使用情况
+    LATENCY: 延迟数据
+    FAILURE: 错误信息
+    """
     VERSION = "version"
     SIGN_UP = "sign_up"
     USAGE = "usage"
@@ -36,6 +44,10 @@ class RecordType(str, Enum):
 
 
 def get_or_generate_uuid() -> str:
+    """获取或生成客户 UUID
+    如果已缓存则返回缓存的 UUID
+    否则从 KV 存储中获取，如果不存在则生成新的 UUID 并存储
+    """
     global _CACHED_UUID
 
     if _CACHED_UUID is not None:
@@ -53,6 +65,11 @@ def get_or_generate_uuid() -> str:
 
 
 def _get_or_generate_instance_domain() -> str | None:
+    """获取或生成实例域名
+    首先检查缓存
+    然后从 KV 存储获取
+    如果不存在则获取第一个用户的邮箱域名作为实例域名
+    """
     global _CACHED_INSTANCE_DOMAIN
 
     if _CACHED_INSTANCE_DOMAIN is not None:
@@ -75,8 +92,20 @@ def _get_or_generate_instance_domain() -> str | None:
 
 
 def optional_telemetry(
-    record_type: RecordType, data: dict, user_id: str | None = None
+    record_type: RecordType, 
+    data: dict, 
+    user_id: str | None = None
 ) -> None:
+    """可选的遥测数据收集函数
+    
+    Args:
+        record_type: 遥测记录类型
+        data: 需要发送的数据
+        user_id: 用户ID，可选
+        
+    收集并发送遥测数据到服务器，在单独的线程中执行以减少性能影响
+    如果 DISABLE_TELEMETRY 为 True 则不执行任何操作
+    """
     if DISABLE_TELEMETRY:
         return
 
@@ -117,6 +146,16 @@ def mt_cloud_telemetry(
     event: MilestoneRecordType,
     properties: dict | None = None,
 ) -> None:
+    """多租户云版本的遥测实现
+    
+    Args:
+        distinct_id: 唯一标识符
+        event: 里程碑事件类型
+        properties: 事件属性，可选
+        
+    仅在多租户模式下执行
+    用于 Onyx MT Cloud 版本的特定遥测功能
+    """
     if not MULTI_TENANT:
         return
 
@@ -132,11 +171,22 @@ def mt_cloud_telemetry(
 
 def create_milestone_and_report(
     user: User | None,
-    distinct_id: str,
+    distinct_id: str, 
     event_type: MilestoneRecordType,
     properties: dict | None,
     db_session: Session,
 ) -> None:
+    """创建里程碑记录并报告
+    
+    Args:
+        user: 用户对象，可选
+        distinct_id: 唯一标识符
+        event_type: 里程碑事件类型
+        properties: 事件属性，可选
+        db_session: 数据库会话
+        
+    创建新的里程碑记录，并在创建成功时发送遥测数据
+    """
     _, is_new = create_milestone_if_not_exists(user, event_type, db_session)
     if is_new:
         mt_cloud_telemetry(

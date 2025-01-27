@@ -1,8 +1,22 @@
+"""
+此模块用于定义和管理LLM（大型语言模型）提供商的配置选项和描述信息。
+包含了对OpenAI、Anthropic、Azure OpenAI和AWS Bedrock等主要LLM提供商的支持。
+"""
+
 import litellm  # type: ignore
 from pydantic import BaseModel
 
 
 class CustomConfigKey(BaseModel):
+    """
+    自定义配置键的模型类，用于定义LLM提供商的配置参数。
+    
+    属性：
+        name: 配置键名称
+        description: 配置说明
+        is_required: 是否必需
+        is_secret: 是否为敏感信息
+    """
     name: str
     description: str | None = None
     is_required: bool = True
@@ -10,6 +24,22 @@ class CustomConfigKey(BaseModel):
 
 
 class WellKnownLLMProviderDescriptor(BaseModel):
+    """
+    LLM提供商描述符类，用于描述LLM提供商的基本信息和配置要求。
+    
+    属性：
+        name: 提供商名称
+        display_name: 显示名称
+        api_key_required: 是否需要API密钥
+        api_base_required: 是否需要API基础URL
+        api_version_required: 是否需要API版本
+        custom_config_keys: 自定义配置键列表
+        llm_names: 支持的模型名称列表
+        default_model: 默认模型
+        default_fast_model: 默认快速模型
+        deployment_name_required: 是否需要部署名称
+        single_model_supported: 是否支持单一模型部署
+    """
     name: str
     display_name: str
     api_key_required: bool
@@ -19,12 +49,11 @@ class WellKnownLLMProviderDescriptor(BaseModel):
     llm_names: list[str]
     default_model: str | None = None
     default_fast_model: str | None = None
-    # set for providers like Azure, which require a deployment name.
     deployment_name_required: bool = False
-    # set for providers like Azure, which support a single model per deployment.
     single_model_supported: bool = False
 
 
+# 定义各提供商的常量名称
 OPENAI_PROVIDER_NAME = "openai"
 OPEN_AI_MODEL_NAMES = [
     "o1-mini",
@@ -51,8 +80,7 @@ OPEN_AI_MODEL_NAMES = [
 ]
 
 BEDROCK_PROVIDER_NAME = "bedrock"
-# need to remove all the weird "bedrock/eu-central-1/anthropic.claude-v1" named
-# models
+# 需要移除所有带有奇怪格式的模型名称，如 "bedrock/eu-central-1/anthropic.claude-v1"
 BEDROCK_MODEL_NAMES = [
     model
     for model in litellm.bedrock_models
@@ -82,6 +110,12 @@ _PROVIDER_TO_MODELS_MAP = {
 
 
 def fetch_available_well_known_llms() -> list[WellKnownLLMProviderDescriptor]:
+    """
+    获取所有可用的已知LLM提供商的描述符列表。
+    
+    返回值：
+        list[WellKnownLLMProviderDescriptor]: 包含所有已配置的LLM提供商描述符的列表
+    """
     return [
         WellKnownLLMProviderDescriptor(
             name="openai",
@@ -144,4 +178,13 @@ def fetch_available_well_known_llms() -> list[WellKnownLLMProviderDescriptor]:
 
 
 def fetch_models_for_provider(provider_name: str) -> list[str]:
+    """
+    获取指定提供商支持的模型列表。
+    
+    参数：
+        provider_name: 提供商名称
+        
+    返回值：
+        list[str]: 该提供商支持的模型名称列表，如果提供商不存在则返回空列表
+    """
     return _PROVIDER_TO_MODELS_MAP.get(provider_name, [])

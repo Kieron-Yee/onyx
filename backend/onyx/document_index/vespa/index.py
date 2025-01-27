@@ -1,3 +1,15 @@
+"""
+这是Onyx系统的Vespa索引实现模块。它提供了与Vespa搜索引擎的集成功能，包括文档的索引、更新、删除和检索等核心操作。
+该模块实现了DocumentIndex接口，为系统提供了一个基于Vespa的文档存储和搜索解决方案。
+
+主要功能包括:
+- 文档的索引和批量处理
+- 文档内容的更新
+- 基于ID和混合方式的文档检索
+- 多租户支持
+- 文档访问控制
+"""
+
 import concurrent.futures
 import io
 import logging
@@ -82,18 +94,36 @@ from shared_configs.model_server_models import Embedding
 logger = setup_logger()
 
 # Set the logging level to WARNING to ignore INFO and DEBUG logs
+# 将日志级别设置为WARNING，忽略INFO和DEBUG日志
 httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.WARNING)
 
 
 @dataclass
 class _VespaUpdateRequest:
+    """
+    Vespa更新请求的数据类。
+    
+    属性:
+        document_id: 文档ID
+        url: 更新请求的URL
+        update_request: 更新请求的具体内容字典
+    """
     document_id: str
-    url: str
+    url: str  
     update_request: dict[str, dict]
 
 
 def in_memory_zip_from_file_bytes(file_contents: dict[str, bytes]) -> BinaryIO:
+    """
+    将文件内容压缩成内存中的ZIP文件。
+    
+    参数:
+        file_contents: 包含文件名和对应内容的字典
+        
+    返回:
+        一个包含ZIP文件内容的二进制IO对象
+    """
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
         for filename, content in file_contents.items():
@@ -103,6 +133,15 @@ def in_memory_zip_from_file_bytes(file_contents: dict[str, bytes]) -> BinaryIO:
 
 
 def _create_document_xml_lines(doc_names: list[str | None] | list[str]) -> str:
+    """
+    生成Vespa文档XML配置行。
+    
+    参数:
+        doc_names: 文档名称列表
+        
+    返回:
+        包含所有文档配置的XML字符串
+    """
     doc_lines = [
         f'<document type="{doc_name}" mode="index" />'
         for doc_name in doc_names
@@ -112,7 +151,17 @@ def _create_document_xml_lines(doc_names: list[str | None] | list[str]) -> str:
 
 
 def add_ngrams_to_schema(schema_content: str) -> str:
+    """
+    向Vespa schema中的title和content字段添加n-gram配置。
+    
+    参数:
+        schema_content: 原始schema内容
+        
+    返回:
+        添加了n-gram配置后的schema内容
+    """
     # Add the match blocks containing gram and gram-size to title and content fields
+    # 向title和content字段添加包含gram和gram-size的匹配块
     schema_content = re.sub(
         r"(field title type string \{[^}]*indexing: summary \| index \| attribute)",
         r"\1\n            match {\n                gram\n                gram-size: 3\n            }",
@@ -127,12 +176,30 @@ def add_ngrams_to_schema(schema_content: str) -> str:
 
 
 class VespaIndex(DocumentIndex):
+    """
+    Vespa索引实现类，提供文档的索引、更新、删除和检索功能。
+
+    属性:
+        index_name: 主索引名称
+        secondary_index_name: 次要索引名称
+        multitenant: 是否为多租户模式
+        http_client: Vespa HTTP客户端
+    """
+
     def __init__(
         self,
         index_name: str,
         secondary_index_name: str | None,
         multitenant: bool = False,
     ) -> None:
+        """
+        初始化VespaIndex实例。
+
+        参数:
+            index_name: 主索引名称
+            secondary_index_name: 次要索引名称(可选)
+            multitenant: 是否启用多租户模式
+        """
         self.index_name = index_name
         self.secondary_index_name = secondary_index_name
         self.multitenant = multitenant
@@ -143,9 +210,17 @@ class VespaIndex(DocumentIndex):
         index_embedding_dim: int,
         secondary_index_embedding_dim: int | None,
     ) -> None:
+        """
+        确保Vespa索引存在，如果不存在则创建。
+        
+        参数:
+            index_embedding_dim: 主索引的embedding维度
+            secondary_index_embedding_dim: 次要索引的embedding维度(如果有的话)
+        """
         if MULTI_TENANT:
             logger.info(
                 "Skipping Vespa index seup for multitenant (would wipe all indices)"
+                # 跳过多租户的Vespa索引设置(会清除所有索引)
             )
             return None
 
@@ -183,6 +258,8 @@ class VespaIndex(DocumentIndex):
 
         # Vespa requires an override to erase data including the indices we're no longer using
         # It also has a 30 day cap from current so we set it to 7 dynamically
+        # Vespa需要覆盖以擦除包括我们不再使用的索引在内的数据
+        # 它有30天的当前时间上限，所以我们动态设置为7天
         now = datetime.now()
         date_in_7_days = now + timedelta(days=7)
         formatted_date = date_in_7_days.strftime("%Y-%m-%d")
@@ -226,8 +303,19 @@ class VespaIndex(DocumentIndex):
         indices: list[str],
         embedding_dims: list[int],
     ) -> None:
+        """
+        注册多租户索引。仅在启用多租户模式时可用。
+
+        参数:
+            indices: 要注册的索引列表
+            embedding_dims: 每个索引对应的嵌入维度列表
+
+        异常:
+            ValueError: 当多租户模式未启用时抛出
+        """
         if not MULTI_TENANT:
             raise ValueError("Multi-tenant is not enabled")
+            # 多租户未启用
 
         deploy_url = f"{VESPA_APPLICATION_ENDPOINT}/tenant/default/prepareandactivate"
         logger.info(f"Deploying Vespa application package to {deploy_url}")
@@ -243,6 +331,7 @@ class VespaIndex(DocumentIndex):
             services_template = services_f.read()
 
         # Generate schema names from index settings
+        # 从索引设置生成schema名称
         schema_names = [index_name for index_name in indices]
 
         full_schemas = schema_names
@@ -267,6 +356,8 @@ class VespaIndex(DocumentIndex):
 
         # Vespa requires an override to erase data including the indices we're no longer using
         # It also has a 30 day cap from current so we set it to 7 dynamically
+        # Vespa需要覆盖以擦除包括我们不再使用的索引在内的数据
+        # 它有30天的当前时间上限，所以我们动态设置为7天
         now = datetime.now()
         date_in_7_days = now + timedelta(days=7)
         formatted_date = date_in_7_days.strftime("%Y-%m-%d")
@@ -311,23 +402,32 @@ class VespaIndex(DocumentIndex):
         chunks: list[DocMetadataAwareIndexChunk],
         index_batch_params: IndexBatchParams,
     ) -> set[DocumentInsertionRecord]:
-        """Receive a list of chunks from a batch of documents and index the chunks into Vespa along
-        with updating the associated permissions. Assumes that a document will not be split into
-        multiple chunk batches calling this function multiple times, otherwise only the last set of
-        chunks will be kept"""
+        """
+        将文档块批量索引到Vespa中并更新相关权限。
+        假设一个文档不会被分割成多个块批次多次调用此函数，否则只会保留最后一组块。
 
+        参数:
+            chunks: 要索引的文档块列表
+            index_batch_params: 索引批处理参数
+
+        返回:
+            文档插入记录集合
+        """
         doc_id_to_previous_chunk_cnt = index_batch_params.doc_id_to_previous_chunk_cnt
         doc_id_to_new_chunk_cnt = index_batch_params.doc_id_to_new_chunk_cnt
         tenant_id = index_batch_params.tenant_id
         large_chunks_enabled = index_batch_params.large_chunks_enabled
 
         # IMPORTANT: This must be done one index at a time, do not use secondary index here
+        # 重要：这必须一次处理一个索引，不要在这里使用次要索引
         cleaned_chunks = [clean_chunk_id_copy(chunk) for chunk in chunks]
 
         existing_docs: set[str] = set()
 
         # NOTE: using `httpx` here since `requests` doesn't support HTTP2. This is beneficial for
         # indexing / updates / deletes since we have to make a large volume of requests.
+        # 注意：这里使用`httpx`是因为`requests`不支持HTTP2。这对于索引/更新/删除操作很有益，
+        # 因为我们需要发送大量请求。
         with (
             concurrent.futures.ThreadPoolExecutor(max_workers=NUM_THREADS) as executor,
             get_vespa_http_client() as http_client,
@@ -336,6 +436,8 @@ class VespaIndex(DocumentIndex):
             # know precisely which chunks to delete. This information exists for
             # documents that have `chunk_count` in the database, but not for
             # `old_version` documents.
+            # 我们需要每个文档的起始和结束索引以准确知道要删除哪些块。
+            # 这些信息存在于数据库中有`chunk_count`的文档中，但在`old_version`文档中不存在。
 
             enriched_doc_infos: list[EnrichedDocumentIndexingInfo] = []
             for document_id, _ in doc_id_to_previous_chunk_cnt.items():
@@ -366,6 +468,9 @@ class VespaIndex(DocumentIndex):
 
             # Now, for each doc, we know exactly where to start and end our deletion
             # So let's generate the chunk IDs for each chunk to delete
+            # 现在，对于每个文档，我们确切知道从哪里开始和结束删除
+            # 因此让我们为每个要删除的块生成块ID
+
             chunks_to_delete = assemble_document_chunk_info(
                 enriched_document_info_list=enriched_doc_infos,
                 tenant_id=tenant_id,
@@ -405,8 +510,16 @@ class VespaIndex(DocumentIndex):
         updates: list[_VespaUpdateRequest],
         batch_size: int = BATCH_SIZE,
     ) -> None:
-        """Runs a batch of updates in parallel via the ThreadPoolExecutor."""
+        """
+        通过ThreadPoolExecutor并行执行批量更新请求。
 
+        参数:
+            updates: Vespa更新请求列表
+            batch_size: 批处理大小，默认为BATCH_SIZE
+
+        异常:
+            requests.HTTPError: 当更新请求失败时抛出
+        """
         def _update_chunk(
             update: _VespaUpdateRequest, http_client: httpx.Client
         ) -> httpx.Response:
@@ -444,6 +557,12 @@ class VespaIndex(DocumentIndex):
                         raise requests.HTTPError(failure_msg) from e
 
     def update(self, update_requests: list[UpdateRequest]) -> None:
+        """
+        更新多个文档的字段。
+
+        参数:
+            update_requests: 更新请求列表，每个请求包含文档ID和要更新的字段
+        """
         logger.debug(f"Updating {len(update_requests)} documents in Vespa")
 
         # Handle Vespa character limitations
@@ -534,11 +653,17 @@ class VespaIndex(DocumentIndex):
         )
 
     def update_single(self, doc_id: str, fields: VespaDocumentFields) -> int:
-        """Note: if the document id does not exist, the update will be a no-op and the
-        function will complete with no errors or exceptions.
-        Handle other exceptions if you wish to implement retry behavior
         """
+        更新单个文档的字段。如果文档ID不存在，更新操作将是空操作且不会抛出异常。
+        如果需要重试机制请自行处理其他异常。
 
+        参数:
+            doc_id: 要更新的文档ID
+            fields: 要更新的字段值
+
+        返回:
+            更新的块数量
+        """
         total_chunks_updated = 0
 
         # Handle Vespa character limitations
@@ -622,9 +747,15 @@ class VespaIndex(DocumentIndex):
         return total_chunks_updated
 
     def delete_single(self, doc_id: str) -> int:
-        """Possibly faster overall than the delete method due to using a single
-        delete call with a selection query."""
+        """
+        删除单个文档。由于使用单个删除调用和选择查询，可能比批量删除方法更快。
 
+        参数:
+            doc_id: 要删除的文档ID
+
+        返回:
+            删除的块数量
+        """
         total_chunks_deleted = 0
 
         # Vespa deletion is poorly documented ... luckily we found this
@@ -695,6 +826,18 @@ class VespaIndex(DocumentIndex):
         batch_retrieval: bool = False,
         get_large_chunks: bool = False,
     ) -> list[InferenceChunkUncleaned]:
+        """
+        基于ID的文档检索。
+
+        参数:
+            chunk_requests: 块请求列表
+            filters: 索引过滤条件
+            batch_retrieval: 是否使用批量检索
+            get_large_chunks: 是否获取大块文档
+
+        返回:
+            检索到的文档块列表
+        """
         if batch_retrieval:
             return batch_search_api_retrieval(
                 index_name=self.index_name,
@@ -721,8 +864,26 @@ class VespaIndex(DocumentIndex):
         offset: int = 0,
         title_content_ratio: float | None = TITLE_CONTENT_RATIO,
     ) -> list[InferenceChunkUncleaned]:
+        """
+        执行混合检索,结合向量搜索和关键词搜索。
+
+        参数:
+            query: 搜索查询
+            query_embedding: 查询文本的embedding向量
+            final_keywords: 最终的关键词列表
+            filters: 索引过滤条件
+            hybrid_alpha: 混合搜索权重系数
+            time_decay_multiplier: 时间衰减乘数
+            num_to_retrieve: 需要检索的文档数量
+            offset: 分页偏移量
+            title_content_ratio: 标题和内容的权重比例
+
+        返回:
+            符合条件的文档块列表
+        """
         vespa_where_clauses = build_vespa_filters(filters)
         # Needs to be at least as much as the value set in Vespa schema config
+        # 需要至少和Vespa schema配置中设置的值一样大
         target_hits = max(10 * num_to_retrieve, 1000)
         yql = (
             YQL_BASE.format(index_name=self.index_name)
@@ -761,14 +922,27 @@ class VespaIndex(DocumentIndex):
         num_to_retrieve: int = NUM_RETURNED_HITS,
         offset: int = 0,
     ) -> list[InferenceChunkUncleaned]:
+        """
+        执行管理员检索,可以检索到包括隐藏内容在内的所有文档。
+
+        参数:
+            query: 搜索查询
+            filters: 索引过滤条件
+            num_to_retrieve: 需要检索的文档数量
+            offset: 分页偏移量
+            
+        返回:
+            符合条件的文档块列表
+        """
         vespa_where_clauses = build_vespa_filters(filters, include_hidden=True)
         yql = (
             YQL_BASE.format(index_name=self.index_name)
             + vespa_where_clauses
             + '({grammar: "weakAnd"}userInput(@query) '
             # `({defaultIndex: "content_summary"}userInput(@query))` section is
-            # needed for highlighting while the N-gram highlighting is broken /
+            # needed for highlighting while the N-gram highlighting is broken / 
             # not working as desired
+            # 在N-gram高亮功能出现问题/无法按预期工作时,需要使用content_summary索引来实现高亮
             + f'or ({{defaultIndex: "{CONTENT_SUMMARY}"}}userInput(@query)))'
         )
 
@@ -818,14 +992,14 @@ class VespaIndex(DocumentIndex):
         cls, tenant_id: str, index_name: str
     ) -> List[str]:
         """
-        Retrieves all document IDs with the specified tenant_id, handling pagination.
+        获取指定tenant_id的所有文档ID，处理分页。
 
-        Parameters:
-            tenant_id (str): The tenant ID to search for.
-            index_name (str): The name of the index to search in.
+        参数:
+            tenant_id (str): 要搜索的租户ID
+            index_name (str): 要搜索的索引名称
 
-        Returns:
-            List[str]: A list of document IDs matching the tenant_id.
+        返回:
+            List[str]: 匹配tenant_id的文档ID列表
         """
         offset = 0
         limit = 1000  # Vespa's maximum hits per query
@@ -837,6 +1011,7 @@ class VespaIndex(DocumentIndex):
 
         while True:
             # Construct the query to fetch document IDs
+            # 构造查询以获取文档ID
             query_params = {
                 "yql": f'select id from sources * where tenant_id contains "{tenant_id}";',
                 "offset": str(offset),
@@ -881,11 +1056,11 @@ class VespaIndex(DocumentIndex):
         batch_size: int = BATCH_SIZE,
     ) -> None:
         """
-        Deletes documents in batches using multiple threads.
+        使用多线程批量删除文档。
 
-        Parameters:
-            delete_requests (List[_VespaDeleteRequest]): The list of delete requests.
-            batch_size (int): The number of documents to delete in each batch.
+        参数:
+            delete_requests: 删除请求列表，每个请求包含一个文档ID和对应的URL
+            batch_size: 批处理大小，默认为BATCH_SIZE
         """
 
         def _delete_document(
@@ -932,10 +1107,17 @@ class VespaIndex(DocumentIndex):
         filters: IndexFilters,
         num_to_retrieve: int = 10,
     ) -> list[InferenceChunkUncleaned]:
-        """Retrieve random chunks matching the filters using Vespa's random ranking
+        """
+        使用Vespa的随机排序检索匹配过滤条件的随机文档块。
 
-        This method is currently used for random chunk retrieval in the context of
-        assistant starter message creation (passed as sample context for usage by the assistant).
+        此方法当前用于在助手启动消息创建的上下文中进行随机块检索(作为样本上下文供助手使用)。
+
+        参数:
+            filters: 索引过滤条件
+            num_to_retrieve: 需要检索的文档数量,默认为10
+
+        返回:
+            随机选择的符合条件的文档块列表
         """
         vespa_where_clauses = build_vespa_filters(filters, remove_trailing_and=True)
 
@@ -955,9 +1137,17 @@ class VespaIndex(DocumentIndex):
 
 
 class _VespaDeleteRequest:
+    """
+    Vespa删除请求的数据类。
+    
+    属性:
+        document_id: 要删除的文档ID
+        url: 删除请求的URL,会对document_id进行URL编码以确保安全
+    """
     def __init__(self, document_id: str, index_name: str) -> None:
         self.document_id = document_id
         # Encode the document ID to ensure it's safe for use in the URL
+        # 对文档ID进行URL编码以确保在URL中使用时的安全性
         encoded_doc_id = urllib.parse.quote_plus(self.document_id)
         self.url = (
             f"{VESPA_APPLICATION_ENDPOINT}/document/v1/"

@@ -1,3 +1,8 @@
+"""
+数据库认证相关操作模块
+主要负责用户认证、访问令牌管理、用户数据库操作等功能
+"""
+
 from collections.abc import AsyncGenerator
 from collections.abc import Callable
 from typing import Any
@@ -27,8 +32,13 @@ from onyx.utils.variable_functionality import (
 
 
 def get_default_admin_user_emails() -> list[str]:
-    """Returns a list of emails who should default to Admin role.
-    Only used in the EE version. For MIT, just return empty list."""
+    """
+    获取默认管理员用户邮箱列表
+    仅在企业版(EE)中使用,开源版(MIT)返回空列表
+    
+    Returns:
+        list[str]: 默认管理员邮箱列表
+    """
     get_default_admin_user_emails_fn: Callable[
         [], list[str]
     ] = fetch_versioned_implementation_with_fallback(
@@ -39,8 +49,14 @@ def get_default_admin_user_emails() -> list[str]:
 
 def get_total_users_count(db_session: Session) -> int:
     """
-    Returns the total number of users in the system.
-    This is the sum of users and invited users.
+    获取系统中的总用户数量
+    包含实际用户数和被邀请用户数的总和
+    
+    Args:
+        db_session: 数据库会话对象
+    
+    Returns:
+        int: 总用户数量
     """
     user_count = (
         db_session.query(User)
@@ -55,6 +71,18 @@ def get_total_users_count(db_session: Session) -> int:
 
 
 async def get_user_count(only_admin_users: bool = False) -> int:
+    """
+    异步获取用户数量
+    
+    Args:
+        only_admin_users: 是否只统计管理员用户数量
+    
+    Returns:
+        int: 用户数量
+        
+    Raises:
+        RuntimeError: 获取用户数量失败时抛出
+    """
     async with get_async_session_with_tenant() as session:
         stmt = select(func.count(User.id))
         if only_admin_users:
@@ -68,10 +96,30 @@ async def get_user_count(only_admin_users: bool = False) -> int:
 
 # Need to override this because FastAPI Users doesn't give flexibility for backend field creation logic in OAuth flow
 class SQLAlchemyUserAdminDB(SQLAlchemyUserDatabase[UP, ID]):
+    """
+    自定义用户数据库管理类
+    继承自FastAPI Users的SQLAlchemyUserDatabase
+    重写create方法以实现自定义的用户角色分配逻辑
+    """
+    
     async def create(
         self,
         create_dict: Dict[str, Any],
     ) -> UP:
+        """
+        创建新用户
+        
+        Args:
+            create_dict: 包含用户信息的字典
+            
+        Returns:
+            UP: 创建的用户对象
+            
+        Note:
+            - 首个创建的用户将被赋予管理员权限
+            - 在默认管理员邮箱列表中的用户也会被赋予管理员权限
+            - 其他用户将被赋予基础用户权限
+        """
         user_count = await get_user_count()
         if user_count == 0 or create_dict["email"] in get_default_admin_user_emails():
             create_dict["role"] = UserRole.ADMIN
@@ -83,10 +131,28 @@ class SQLAlchemyUserAdminDB(SQLAlchemyUserDatabase[UP, ID]):
 async def get_user_db(
     session: AsyncSession = Depends(get_async_session),
 ) -> AsyncGenerator[SQLAlchemyUserAdminDB, None]:
+    """
+    获取用户数据库实例的依赖函数
+    
+    Args:
+        session: 异步数据库会话
+        
+    Yields:
+        SQLAlchemyUserAdminDB: 用户数据库管理实例
+    """
     yield SQLAlchemyUserAdminDB(session, User, OAuthAccount)  # type: ignore
 
 
 async def get_access_token_db(
     session: AsyncSession = Depends(get_async_session),
 ) -> AsyncGenerator[SQLAlchemyAccessTokenDatabase, None]:
+    """
+    获取访问令牌数据库实例的依赖函数
+    
+    Args:
+        session: 异步数据库会话
+        
+    Yields:
+        SQLAlchemyAccessTokenDatabase: 访问令牌数据库管理实例
+    """
     yield SQLAlchemyAccessTokenDatabase(session, AccessToken)  # type: ignore

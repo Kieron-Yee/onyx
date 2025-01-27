@@ -1,3 +1,11 @@
+"""
+此文件实现了凭证管理相关的API路由功能。
+主要包括：
+1. 凭证的创建、读取、更新和删除操作
+2. 管理员专用的凭证管理接口
+3. 普通用户的凭证管理接口
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -30,17 +38,27 @@ from onyx.server.models import StatusResponse
 from onyx.utils.logger import setup_logger
 from onyx.utils.variable_functionality import fetch_ee_implementation_or_noop
 
+# 创建日志记录器
 logger = setup_logger()
 
-
+# 创建路由器，设置前缀为"/manage"
 router = APIRouter(prefix="/manage")
 
 
 def _ignore_credential_permissions(source: DocumentSource) -> bool:
+    """
+    检查是否需要忽略指定来源的凭证权限
+
+    参数:
+        source: 文档来源类型
+
+    返回:
+        bool: 如果需要忽略权限则返回True，否则返回False
+    """
     return source in CREDENTIAL_PERMISSIONS_TO_IGNORE
 
 
-"""Admin-only endpoints"""
+"""Admin-only endpoints 管理员专用端点"""
 
 
 @router.get("/admin/credential")
@@ -48,7 +66,17 @@ def list_credentials_admin(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[CredentialSnapshot]:
-    """Lists all public credentials"""
+    """
+    Lists all public credentials
+    列出所有公共凭证
+
+    参数:
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+
+    返回:
+        list[CredentialSnapshot]: 凭证快照列表
+    """
     credentials = fetch_credentials(
         db_session=db_session,
         user=user,
@@ -69,6 +97,18 @@ def get_cc_source_full_info(
         False, description="If true, return editable credentials"
     ),
 ) -> list[CredentialSnapshot]:
+    """
+    获取指定来源类型的所有凭证信息
+
+    参数:
+        source_type: 文档来源类型
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        get_editable: 是否返回可编辑的凭证
+
+    返回:
+        list[CredentialSnapshot]: 凭证快照列表
+    """
     credentials = fetch_credentials_by_source(
         db_session=db_session,
         user=user,
@@ -87,7 +127,18 @@ def delete_credential_by_id_admin(
     _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
-    """Same as the user endpoint, but can delete any credential (not just the user's own)"""
+    """
+    Same as the user endpoint, but can delete any credential (not just the user's own)
+    与用户端点相同，但可以删除任何凭证（不仅仅是用户自己的）
+
+    参数:
+        credential_id: 要删除的凭证ID
+        _: 当前管理员用户
+        db_session: 数据库会话
+
+    返回:
+        StatusResponse: 删除操作的状态响应
+    """
     delete_credential(db_session=db_session, credential_id=credential_id, user=None)
     return StatusResponse(
         success=True, message="Credential deleted successfully", data=credential_id
@@ -100,6 +151,17 @@ def swap_credentials_for_connector(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    交换连接器的凭证
+
+    参数:
+        credential_swap_req: 凭证交换请求
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        StatusResponse: 交换操作的状态响应
+    """
     connector_credential_pair = swap_credentials_connector(
         new_credential_id=credential_swap_req.new_credential_id,
         connector_id=credential_swap_req.connector_id,
@@ -120,6 +182,17 @@ def create_credential_from_model(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> ObjectCreationIdResponse:
+    """
+    从模型创建凭证
+
+    参数:
+        credential_info: 凭证基本信息
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+
+    返回:
+        ObjectCreationIdResponse: 创建操作的响应，包含新创建的凭证ID
+    """
     if not _ignore_credential_permissions(credential_info.source):
         fetch_ee_implementation_or_noop(
             "onyx.db.user_group", "validate_object_creation_for_user", None
@@ -131,6 +204,7 @@ def create_credential_from_model(
         )
 
     # Temporary fix for empty Google App credentials
+    # 临时修复空的Google App凭证
     if credential_info.source == DocumentSource.GMAIL:
         cleanup_gmail_credentials(db_session=db_session)
     if credential_info.source == DocumentSource.GOOGLE_DRIVE:
@@ -143,7 +217,7 @@ def create_credential_from_model(
     )
 
 
-"""Endpoints for all"""
+"""Endpoints for all 所有用户的端点"""
 
 
 @router.get("/credential")
@@ -151,6 +225,16 @@ def list_credentials(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[CredentialSnapshot]:
+    """
+    列出所有凭证
+
+    参数:
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        list[CredentialSnapshot]: 凭证快照列表
+    """
     credentials = fetch_credentials(db_session=db_session, user=user)
     return [
         CredentialSnapshot.from_credential_db_model(credential)
@@ -164,6 +248,17 @@ def get_credential_by_id(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> CredentialSnapshot | StatusResponse[int]:
+    """
+    根据ID获取凭证
+
+    参数:
+        credential_id: 凭证ID
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        CredentialSnapshot | StatusResponse[int]: 凭证快照或状态响应
+    """
     credential = fetch_credential_by_id(
         credential_id,
         user,
@@ -186,6 +281,18 @@ def update_credential_data(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> CredentialBase:
+    """
+    更新凭证数据
+
+    参数:
+        credential_id: 凭证ID
+        credential_update: 凭证数据更新请求
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        CredentialBase: 更新后的凭证基本信息
+    """
     credential = alter_credential(
         credential_id,
         credential_update.name,
@@ -210,6 +317,18 @@ def update_credential_from_model(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> CredentialSnapshot | StatusResponse[int]:
+    """
+    从模型更新凭证
+
+    参数:
+        credential_id: 凭证ID
+        credential_data: 凭证基本信息
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        CredentialSnapshot | StatusResponse[int]: 更新后的凭证快照或状态响应
+    """
     updated_credential = update_credential(
         credential_id, credential_data, user, db_session
     )
@@ -238,6 +357,17 @@ def delete_credential_by_id(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    根据ID删除凭证
+
+    参数:
+        credential_id: 凭证ID
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        StatusResponse: 删除操作的状态响应
+    """
     delete_credential(
         credential_id,
         user,
@@ -255,6 +385,17 @@ def force_delete_credential_by_id(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    强制删除指定ID的凭证
+
+    参数:
+        credential_id: 要删除的凭证ID
+        user: 当前用户
+        db_session: 数据库会话
+
+    返回:
+        StatusResponse: 删除操作的状态响应
+    """
     delete_credential(credential_id, user, db_session, True)
 
     return StatusResponse(

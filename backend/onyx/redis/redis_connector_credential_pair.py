@@ -1,3 +1,11 @@
+"""
+此文件用于管理连接器凭证对的 Redis 相关操作。
+主要功能包括：
+1. 扫描数据库中需要同步的文档
+2. 将文档收集到统一的集合中进行同步
+3. 管理文档同步状态和任务调度
+"""
+
 import time
 from typing import cast
 from uuid import uuid4
@@ -25,42 +33,83 @@ class RedisConnectorCredentialPair(RedisObjectHelper):
 
     It differs from the other redis helpers in that the taskset used spans
     all connectors and is not per connector."""
+    """
+    此类用于通过 cc_pair 扫描数据库中的文档，并将它们收集到统一的集合中进行同步。
+    
+    与其他 redis 辅助类的不同之处在于，使用的任务集跨越所有连接器，而不是每个连接器单独使用。
+    """
 
+    # Redis 键前缀定义
     PREFIX = "connectorsync"
     FENCE_PREFIX = PREFIX + "_fence"
     TASKSET_PREFIX = PREFIX + "_taskset"
-
-    # SYNCING_HASH = PREFIX + ":vespa_syncing"
     SYNCING_PREFIX = PREFIX + ":vespa_syncing"
 
     def __init__(self, tenant_id: str | None, id: int) -> None:
+        """
+        初始化方法
+        
+        参数:
+            tenant_id: 租户ID
+            id: 连接器凭证对ID
+        """
         super().__init__(tenant_id, str(id))
-
-        # documents that should be skipped
+        # 需要跳过的文档集合
         self.skip_docs: set[str] = set()
 
     @classmethod
     def get_fence_key(cls) -> str:
+        """
+        获取fence键名
+        
+        返回值:
+            str: fence键名
+        """
         return RedisConnectorCredentialPair.FENCE_PREFIX
 
     @classmethod
     def get_taskset_key(cls) -> str:
+        """
+        获取任务集键名
+        
+        返回值:
+            str: 任务集键名
+        """
         return RedisConnectorCredentialPair.TASKSET_PREFIX
 
     @property
     def taskset_key(self) -> str:
         """Notice that this is intentionally reusing the same taskset for all
         connector syncs"""
-        # example: connector_taskset
+        """
+        获取任务集键名
+        注意：这里故意为所有连接器同步重用相同的任务集
+        
+        返回值:
+            str: 任务集键名
+        """
         return f"{self.TASKSET_PREFIX}"
 
     def set_skip_docs(self, skip_docs: set[str]) -> None:
-        # documents that should be skipped. Note that this classes updates
-        # the list on the fly
+        """
+        设置需要跳过的文档列表
+        
+        参数:
+            skip_docs: 需要跳过的文档ID集合
+        """
         self.skip_docs = skip_docs
 
     @staticmethod
     def make_redis_syncing_key(doc_id: str) -> str:
+        """
+        生成文档同步状态的Redis键名
+        
+        参数:
+            doc_id: 文档ID
+            
+        返回值:
+            str: Redis键名
+        """
         return f"{RedisConnectorCredentialPair.SYNCING_PREFIX}:{doc_id}"
 
     def generate_tasks(
@@ -71,7 +120,20 @@ class RedisConnectorCredentialPair(RedisObjectHelper):
         lock: RedisLock,
         tenant_id: str | None,
     ) -> tuple[int, int] | None:
-        # an arbitrary number in seconds to prevent the same doc from syncing repeatedly
+        """
+        生成同步任务
+        
+        参数:
+            celery_app: Celery应用实例
+            db_session: 数据库会话
+            redis_client: Redis客户端
+            lock: Redis锁
+            tenant_id: 租户ID
+            
+        返回值:
+            tuple[int, int] | None: 返回(已创建的任务数, 总文档数)的元组，如果失败返回None
+        """
+        # 设置同步过期时间（24小时），防止同一文档重复同步
         SYNC_EXPIRATION = 24 * 60 * 60
 
         last_lock_time = time.monotonic()
@@ -81,15 +143,19 @@ class RedisConnectorCredentialPair(RedisObjectHelper):
         if not cc_pair:
             return None
 
+        # 构建需要同步的文档查询语句
         stmt = construct_document_select_for_connector_credential_pair_by_needs_sync(
             cc_pair.connector_id, cc_pair.credential_id
         )
 
         num_docs = 0
 
+        # 遍历需要同步的文档
         for doc in db_session.scalars(stmt).yield_per(1):
             doc = cast(Document, doc)
             current_time = time.monotonic()
+            
+            # 定期重新获取锁，防止锁超时
             if current_time - last_lock_time >= (
                 CELERY_VESPA_SYNC_BEAT_LOCK_TIMEOUT / 4
             ):
@@ -98,38 +164,26 @@ class RedisConnectorCredentialPair(RedisObjectHelper):
 
             num_docs += 1
 
-            # check if we should skip the document (typically because it's already syncing)
+            # 检查是否需要跳过该文档
             if doc.id in self.skip_docs:
                 continue
-
-            # is the document sync already queued?
-            # if redis_client.hexists(doc.id):
-            #     continue
 
             redis_syncing_key = self.make_redis_syncing_key(doc.id)
             if redis_client.exists(redis_syncing_key):
                 continue
 
-            # celery's default task id format is "dd32ded3-00aa-4884-8b21-42f8332e7fac"
-            # the key for the result is "celery-task-meta-dd32ded3-00aa-4884-8b21-42f8332e7fac"
-            # we prefix the task id so it's easier to keep track of who created the task
-            # aka "documentset_1_6dd32ded3-00aa-4884-8b21-42f8332e7fac"
+            # 生成自定义任务ID
             custom_task_id = f"{self.task_id_prefix}_{uuid4()}"
 
-            # add to the tracking taskset in redis BEFORE creating the celery task.
-            # note that for the moment we are using a single taskset key, not differentiated by cc_pair id
+            # 将任务添加到Redis任务集
             redis_client.sadd(
                 RedisConnectorCredentialPair.get_taskset_key(), custom_task_id
             )
 
-            # track the doc.id in redis so that we don't resubmit it repeatedly
-            # redis_client.hset(
-            #     self.SYNCING_HASH, doc.id, custom_task_id
-            # )
-
+            # 在Redis中记录文档同步状态
             redis_client.set(redis_syncing_key, custom_task_id, ex=SYNC_EXPIRATION)
 
-            # Priority on sync's triggered by new indexing should be medium
+            # 创建Celery同步任务
             result = celery_app.send_task(
                 OnyxCeleryTask.VESPA_METADATA_SYNC_TASK,
                 kwargs=dict(document_id=doc.id, tenant_id=tenant_id),

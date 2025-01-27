@@ -1,3 +1,13 @@
+"""
+这个文件主要实现用户管理相关的API接口,包括:
+1. 用户角色管理
+2. 用户列表查询 
+3. 用户邀请
+4. 用户激活/停用
+5. 用户首选项设置
+6. 用户认证相关功能
+"""
+
 import re
 from datetime import datetime
 from datetime import timezone
@@ -70,6 +80,7 @@ from shared_configs.configs import MULTI_TENANT
 logger = setup_logger()
 router = APIRouter()
 
+# 设置每页显示的用户数量
 USERS_PAGE_SIZE = 10
 
 
@@ -79,6 +90,18 @@ def set_user_role(
     current_user: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    设置用户角色
+    
+    参数:
+        user_role_update_request: 用户角色更新请求
+        current_user: 当前管理员用户
+        db_session: 数据库会话
+        
+    异常:
+        404: 用户未找到
+        400: 管理员不能降级自己的角色
+    """
     user_to_update = get_user_by_email(
         email=user_role_update_request.user_email, db_session=db_session
     )
@@ -124,6 +147,20 @@ def list_accepted_users(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> PaginatedReturn[FullUserSnapshot]:
+    """
+    获取已接受邀请的用户列表
+    
+    参数:
+        q: 搜索关键字
+        page_num: 页码
+        page_size: 每页大小
+        roles: 角色过滤
+        is_active: 是否激活
+        db_session: 数据库会话
+        
+    返回:
+        分页后的用户列表数据
+    """
     filtered_accepted_users = get_page_of_filtered_users(
         db_session=db_session,
         page_size=page_size,
@@ -159,6 +196,15 @@ def list_accepted_users(
 def list_invited_users(
     _: User | None = Depends(current_admin_user),
 ) -> list[InvitedUserSnapshot]:
+    """
+    获取已邀请的用户列表
+    
+    参数:
+        db_session: 数据库会话
+        
+    返回:
+        已邀请的用户列表
+    """
     invited_emails = get_invited_users()
 
     return [InvitedUserSnapshot(email=email) for email in invited_emails]
@@ -173,6 +219,19 @@ def list_all_users(
     _: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> AllUsersResponse:
+    """
+    获取所有用户列表
+    
+    参数:
+        q: 搜索关键字
+        accepted_page: 已接受用户页码
+        slack_users_page: Slack用户页码
+        invited_page: 已邀请用户页码
+        db_session: 数据库会话
+        
+    返回:
+        所有用户的响应数据
+    """
     users = [
         user
         for user in get_all_users(db_session, email_filter_string=q)
@@ -260,9 +319,17 @@ def bulk_invite_users(
     current_user: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> int:
-    """emails are string validated. If any email fails validation, no emails are
-    invited and an exception is raised."""
-
+    """
+    批量邀请用户
+    
+    参数:
+        emails: 用户邮箱列表
+        current_user: 当前管理员用户
+        db_session: 数据库会话
+        
+    返回:
+        邀请的用户数量
+    """
     if current_user is None:
         raise HTTPException(
             status_code=400, detail="Auth is disabled, cannot invite users"
@@ -335,6 +402,16 @@ def remove_invited_user(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> int:
+    """
+    移除已邀请的用户
+    
+    参数:
+        user_email: 用户邮箱
+        db_session: 数据库会话
+        
+    返回:
+        剩余的已邀请用户数量
+    """
     user_emails = get_invited_users()
     remaining_users = [user for user in user_emails if user != user_email.user_email]
 
@@ -365,6 +442,14 @@ def deactivate_user(
     current_user: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    停用用户
+    
+    参数:
+        user_email: 用户邮箱
+        current_user: 当前管理员用户
+        db_session: 数据库会话
+    """
     if current_user is None:
         raise HTTPException(
             status_code=400, detail="Auth is disabled, cannot deactivate user"
@@ -394,6 +479,13 @@ async def delete_user(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除用户
+    
+    参数:
+        user_email: 用户邮箱
+        db_session: 数据库会话
+    """
     user_to_delete = get_user_by_email(
         email=user_email.user_email, db_session=db_session
     )
@@ -427,6 +519,13 @@ def activate_user(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    激活用户
+    
+    参数:
+        user_email: 用户邮箱
+        db_session: 数据库会话
+    """
     user_to_activate = get_user_by_email(
         email=user_email.user_email, db_session=db_session
     )
@@ -445,6 +544,12 @@ def activate_user(
 def get_valid_domains(
     _: User | None = Depends(current_admin_user),
 ) -> list[str]:
+    """
+    获取有效的域名列表
+    
+    返回:
+        有效的域名列表
+    """
     return VALID_EMAIL_DOMAINS
 
 
@@ -456,12 +561,30 @@ def list_all_users_basic_info(
     _: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[MinimalUserSnapshot]:
+    """
+    获取所有用户的基本信息
+    
+    参数:
+        db_session: 数据库会话
+        
+    返回:
+        所有用户的基本信息列表
+    """
     users = get_all_users(db_session)
     return [MinimalUserSnapshot(id=user.id, email=user.email) for user in users]
 
 
 @router.get("/get-user-role")
 async def get_user_role(user: User = Depends(current_user)) -> UserRoleResponse:
+    """
+    获取当前用户的角色
+    
+    参数:
+        user: 当前用户
+        
+    返回:
+        用户角色响应
+    """
     if user is None:
         raise ValueError("Invalid or missing user.")
     return UserRoleResponse(role=user.role)
@@ -470,6 +593,16 @@ async def get_user_role(user: User = Depends(current_user)) -> UserRoleResponse:
 def get_current_token_expiration_jwt(
     user: User | None, request: Request
 ) -> datetime | None:
+    """
+    获取当前JWT的过期时间
+    
+    参数:
+        user: 当前用户
+        request: 请求对象
+        
+    返回:
+        JWT的过期时间
+    """
     if user is None:
         return None
 
@@ -499,6 +632,16 @@ def get_current_token_expiration_jwt(
 def get_current_token_creation(
     user: User | None, db_session: Session
 ) -> datetime | None:
+    """
+    获取当前token的创建时间
+    
+    参数:
+        user: 当前用户
+        db_session: 数据库会话
+        
+    返回:
+        token的创建时间
+    """
     if user is None:
         return None
     try:
@@ -526,6 +669,16 @@ def verify_user_logged_in(
     user: User | None = Depends(optional_user),
     db_session: Session = Depends(get_session),
 ) -> UserInfo:
+    """
+    验证用户是否登录
+    
+    参数:
+        user: 当前用户
+        db_session: 数据库会话
+        
+    返回:
+        用户信息
+    """
     # NOTE: this does not use `current_user` / `current_admin_user` because we don't want
     # to enforce user verification here - the frontend always wants to get the info about
     # the current user regardless of if they are currently verified
@@ -577,6 +730,16 @@ class RecentAssistantsRequest(BaseModel):
 def update_recent_assistants(
     recent_assistants: list[int] | None, current_assistant: int
 ) -> list[int]:
+    """
+    更新最近使用的助手列表
+    
+    参数:
+        recent_assistants: 最近使用的助手列表
+        current_assistant: 当前助手ID
+        
+    返回:
+        更新后的最近使用的助手列表
+    """
     if recent_assistants is None:
         recent_assistants = []
     else:
@@ -596,6 +759,14 @@ def update_user_recent_assistants(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新用户最近使用的助手列表
+    
+    参数:
+        request: 最近使用的助手请求
+        user: 当前用户
+        db_session: 数据库会话
+    """
     if user is None:
         if AUTH_TYPE == AuthType.DISABLED:
             store = get_kv_store()
@@ -629,6 +800,14 @@ def update_user_auto_scroll(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新用户自动滚动设置
+    
+    参数:
+        request: 自动滚动请求
+        user: 当前用户
+        db_session: 数据库会话
+    """
     if user is None:
         if AUTH_TYPE == AuthType.DISABLED:
             store = get_kv_store()
@@ -653,6 +832,14 @@ def update_user_default_model(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新用户默认模型设置
+    
+    参数:
+        request: 默认模型请求
+        user: 当前用户
+        db_session: 数据库会话
+    """
     if user is None:
         if AUTH_TYPE == AuthType.DISABLED:
             store = get_kv_store()
@@ -681,6 +868,14 @@ def update_user_assistant_list(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新用户助手列表
+    
+    参数:
+        request: 助手列表请求
+        user: 当前用户
+        db_session: 数据库会话
+    """
     if user is None:
         if AUTH_TYPE == AuthType.DISABLED:
             store = get_kv_store()
@@ -702,6 +897,17 @@ def update_user_assistant_list(
 def update_assistant_visibility(
     preferences: UserPreferences, assistant_id: int, show: bool
 ) -> UserPreferences:
+    """
+    更新助手可见性设置
+    
+    参数:
+        preferences: 用户首选项
+        assistant_id: 助手ID
+        show: 是否显示
+        
+    返回:
+        更新后的用户首选项
+    """
     visible_assistants = preferences.visible_assistants or []
     hidden_assistants = preferences.hidden_assistants or []
 
@@ -728,6 +934,15 @@ def update_user_assistant_visibility(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新用户助手可见性
+    
+    参数:
+        assistant_id: 助手ID
+        show: 是否显示
+        user: 当前用户
+        db_session: 数据库会话
+    """
     if user is None:
         if AUTH_TYPE == AuthType.DISABLED:
             store = get_kv_store()

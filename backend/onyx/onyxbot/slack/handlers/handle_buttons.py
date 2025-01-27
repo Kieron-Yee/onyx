@@ -1,3 +1,8 @@
+"""
+此文件用于处理Slack机器人中各种按钮事件的处理逻辑。
+主要包括文档反馈、答案生成、用户反馈、后续跟进等按钮的处理函数。
+"""
+
 from typing import Any
 from typing import cast
 
@@ -50,6 +55,17 @@ def handle_doc_feedback_button(
     req: SocketModeRequest,
     client: TenantSocketModeClient,
 ) -> None:
+    """
+    处理文档反馈按钮的点击事件
+    
+    参数:
+        req: Slack的Socket模式请求对象
+        client: 租户Socket模式客户端对象
+    
+    功能:
+    - 从请求中提取反馈ID相关信息
+    - 创建反馈视图并显示给用户
+    """
     if not (actions := req.payload.get("actions")):
         logger.error("Missing actions. Unable to build the source feedback view")
         return
@@ -83,6 +99,18 @@ def handle_generate_answer_button(
     req: SocketModeRequest,
     client: TenantSocketModeClient,
 ) -> None:
+    """
+    处理生成答案按钮的点击事件
+    
+    参数:
+        req: Slack的Socket模式请求对象
+        client: 租户Socket模式客户端对象
+    
+    功能:
+    - 获取对话线程的上下文信息
+    - 基于最后一个用户问题生成新的回答
+    - 发送临时消息通知用户正在生成答案
+    """
     channel_id = req.payload["channel"]["id"]
     channel_name = req.payload["channel"]["name"]
     message_ts = req.payload["message"]["ts"]
@@ -155,6 +183,24 @@ def handle_slack_feedback(
     thread_ts_to_post_confirmation: str,
     tenant_id: str | None,
 ) -> None:
+    """
+    处理Slack反馈事件
+    
+    参数:
+        feedback_id: 反馈标识符
+        feedback_type: 反馈类型
+        feedback_msg_reminder: 反馈提醒消息
+        client: Slack Web客户端
+        user_id_to_post_confirmation: 发送确认消息的用户ID
+        channel_id_to_post_confirmation: 发送确认消息的频道ID
+        thread_ts_to_post_confirmation: 发送确认消息的会话时间戳
+        tenant_id: 租户ID
+    
+    功能:
+    - 处理不同类型的反馈（点赞、踩、认可、拒绝、隐藏等）
+    - 记录反馈到数据库
+    - 发送反馈确认消息
+    """
     message_id, doc_id, doc_rank = decompose_action_id(feedback_id)
 
     with get_session_with_tenant(tenant_id) as db_session:
@@ -236,6 +282,18 @@ def handle_followup_button(
     req: SocketModeRequest,
     client: TenantSocketModeClient,
 ) -> None:
+    """
+    处理后续跟进按钮的点击事件
+    
+    参数:
+        req: Slack的Socket模式请求对象
+        client: 租户Socket模式客户端对象
+    
+    功能:
+    - 添加跟进表情反应
+    - 获取相关标签和用户组
+    - 发送跟进确认消息
+    """
     action_id = None
     if actions := req.payload.get("actions"):
         action = cast(dict[str, Any], actions[0])
@@ -301,6 +359,16 @@ def get_clicker_name(
     req: SocketModeRequest,
     client: TenantSocketModeClient,
 ) -> str:
+    """
+    获取点击按钮的用户名称
+    
+    参数:
+        req: Slack的Socket模式请求对象
+        client: 租户Socket模式客户端对象
+    
+    返回:
+        str: 用户的真实姓名或用户名
+    """
     clicker_name = req.payload.get("user", {}).get("name", "Someone")
     clicker_real_name = None
     try:
@@ -323,6 +391,19 @@ def handle_followup_resolved_button(
     client: TenantSocketModeClient,
     immediate: bool = False,
 ) -> None:
+    """
+    处理标记问题已解决按钮的点击事件
+    
+    参数:
+        req: Slack的Socket模式请求对象
+        client: 租户Socket模式客户端对象
+        immediate: 是否立即标记为已解决
+    
+    功能:
+    - 移除跟进表情反应
+    - 删除原有的解决选项消息
+    - 发送问题已解决的确认消息
+    """
     channel_id = req.payload["container"]["channel_id"]
     message_ts = req.payload["container"]["message_ts"]
     thread_ts = req.payload["container"]["thread_ts"]

@@ -1,3 +1,11 @@
+"""
+此模块提供了用于函数执行时间记录和性能监控的工具。
+主要功能包括：
+1. 函数执行时间的装饰器
+2. 生成器函数执行时间的装饰器
+3. 支持可选的遥测数据收集
+"""
+
 import time
 from collections.abc import Callable
 from collections.abc import Generator
@@ -23,7 +31,28 @@ def log_function_time(
     debug_only: bool = False,
     include_args: bool = False,
 ) -> Callable[[F], F]:
+    """
+    装饰器函数，用于记录被装饰函数的执行时间。
+
+    参数:
+        func_name: str | None - 自定义的函数名称，如果为None则使用原函数名
+        print_only: bool - 是否只打印日志而不发送遥测数据
+        debug_only: bool - 是否只在debug级别记录日志
+        include_args: bool - 是否在日志中包含函数参数
+
+    返回值:
+        Callable - 装饰器函数
+    """
     def decorator(func: F) -> F:
+        """
+        内部装饰器函数
+
+        参数:
+            func: F - 被装饰的函数
+
+        返回值:
+            F - 包装后的函数
+        """
         @wraps(func)
         def wrapped_func(*args: Any, **kwargs: Any) -> Any:
             start_time = time.time()
@@ -55,9 +84,29 @@ def log_function_time(
 
 
 def log_generator_function_time(
-    func_name: str | None = None, print_only: bool = False
+    func_name: str | None = None, 
+    print_only: bool = False
 ) -> Callable[[FG], FG]:
+    """
+    生成器函数的执行时间记录装饰器。
+
+    参数:
+        func_name: str | None - 自定义的函数名称，如果为None则使用原函数名
+        print_only: bool - 是否只打印日志而不发送遥测数据
+
+    返回值:
+        Callable - 装饰器函数
+    """
     def decorator(func: FG) -> FG:
+        """
+        内部装饰器函数
+
+        参数:
+            func: FG - 被装饰的生成器函数
+
+        返回值:
+            FG - 包装后的生成器函数
+        """
         @wraps(func)
         def wrapped_func(*args: Any, **kwargs: Any) -> Any:
             start_time = time.time()

@@ -1,3 +1,11 @@
+"""
+该文件实现了OpenAI Assistants API中的Runs相关功能，主要包括：
+- 创建和管理assistant的运行实例(runs)
+- 处理运行状态的更新和查询
+- 实现runs的取消和列表功能
+- 集成与DAnswer系统的消息处理
+"""
+
 from typing import Literal
 from typing import Optional
 from uuid import UUID
@@ -34,6 +42,17 @@ router = APIRouter()
 
 
 class RunRequest(BaseModel):
+    """
+    运行请求的数据模型
+    
+    参数说明:
+    - assistant_id: assistant的ID
+    - model: 可选，使用的模型名称
+    - instructions: 可选，运行指令
+    - additional_instructions: 可选，额外指令
+    - tools: 可选，可用工具列表
+    - metadata: 可选，元数据
+    """
     assistant_id: int
     model: Optional[str] = None
     instructions: Optional[str] = None
@@ -43,18 +62,23 @@ class RunRequest(BaseModel):
 
 
 RunStatus = Literal[
-    "queued",
-    "in_progress",
-    "requires_action",
-    "cancelling",
-    "cancelled",
-    "failed",
-    "completed",
-    "expired",
+    "queued",  # 排队中
+    "in_progress",  # 进行中
+    "requires_action",  # 需要操作
+    "cancelling",  # 取消中
+    "cancelled",  # 已取消
+    "failed",  # 失败
+    "completed",  # 完成
+    "expired",  # 过期
 ]
 
 
 class RunResponse(BaseModel):
+    """
+    运行响应的数据模型
+    
+    包含运行实例的完整状态信息
+    """
     id: str
     object: Literal["thread.run"]
     created_at: int
@@ -84,6 +108,19 @@ def process_run_in_background(
     user: User | None,
     db_session: Session,
 ) -> None:
+    """
+    在后台处理运行请求
+    
+    参数说明:
+    - message_id: 消息ID
+    - parent_message_id: 父消息ID
+    - chat_session_id: 会话ID
+    - assistant_id: assistant ID
+    - instructions: 运行指令
+    - tools: 工具列表
+    - user: 用户对象
+    - db_session: 数据库会话
+    """
     # Get the latest message in the chat session
     chat_session = get_chat_session_by_id(
         chat_session_id=chat_session_id,
@@ -159,6 +196,19 @@ def create_run(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> RunResponse:
+    """
+    创建新的运行实例
+    
+    参数说明:
+    - thread_id: 会话线程ID
+    - run_request: 运行请求对象
+    - background_tasks: 后台任务管理器
+    - user: 当前用户
+    - db_session: 数据库会话
+    
+    返回:
+    - RunResponse: 运行实例的响应对象
+    """
     try:
         chat_session = get_chat_session_by_id(
             chat_session_id=thread_id,
@@ -229,6 +279,18 @@ def retrieve_run(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> RunResponse:
+    """
+    获取运行实例的详细信息
+    
+    参数说明:
+    - thread_id: 会话线程ID
+    - run_id: 运行实例ID
+    - user: 当前用户
+    - db_session: 数据库会话
+    
+    返回:
+    - RunResponse: 运行实例的详细信息
+    """
     # Retrieve the chat message (which represents a "run" in DAnswer)
     chat_message = get_chat_message(
         chat_message_id=int(run_id),  # Convert string run_id to int
@@ -277,6 +339,18 @@ def cancel_run(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> RunResponse:
+    """
+    取消运行实例
+    
+    参数说明:
+    - thread_id: 会话线程ID
+    - run_id: 运行实例ID
+    - user: 当前用户
+    - db_session: 数据库会话
+    
+    返回:
+    - RunResponse: 更新后的运行实例信息
+    """
     # In DAnswer, we don't have a direct equivalent to cancelling a run
     # We'll simulate it by marking the message as "cancelled"
     chat_message = (
@@ -301,6 +375,21 @@ def list_runs(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[RunResponse]:
+    """
+    获取会话线程中的运行实例列表
+    
+    参数说明:
+    - thread_id: 会话线程ID
+    - limit: 返回结果数量限制
+    - order: 排序方式（升序/降序）
+    - after: 分页参数，获取指定ID之后的结果
+    - before: 分页参数，获取指定ID之前的结果
+    - user: 当前用户
+    - db_session: 数据库会话
+    
+    返回:
+    - list[RunResponse]: 运行实例列表
+    """
     # In DAnswer, we'll treat each message in a chat session as a "run"
     chat_messages = get_chat_messages_by_session(
         chat_session_id=thread_id,
@@ -337,6 +426,21 @@ def list_run_steps(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[dict]:  # You may want to create a specific model for run steps
+    """
+    获取运行实例的步骤列表
+    
+    参数说明:
+    - run_id: 运行实例ID
+    - limit: 返回结果数量限制
+    - order: 排序方式
+    - after: 分页参数
+    - before: 分页参数
+    - user: 当前用户
+    - db_session: 数据库会话
+    
+    返回:
+    - list[dict]: 步骤列表（在DAnswer中始终返回空列表）
+    """
     # DAnswer doesn't have an equivalent to run steps
     # We'll return an empty list to maintain API compatibility
     return []

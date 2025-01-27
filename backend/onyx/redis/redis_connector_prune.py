@@ -1,3 +1,11 @@
+"""
+该文件主要用于管理与Redis的连接器清理任务相关的交互操作。
+主要功能包括：
+1. 管理连接器清理任务的状态
+2. 处理任务生成和进度跟踪
+3. 维护任务集合和子任务
+"""
+
 import time
 from typing import cast
 from uuid import uuid4
@@ -16,7 +24,9 @@ from onyx.db.connector_credential_pair import get_connector_credential_pair_from
 
 class RedisConnectorPrune:
     """Manages interactions with redis for pruning tasks. Should only be accessed
-    through RedisConnector."""
+    through RedisConnector.
+    管理与Redis清理任务相关的交互操作。只能通过RedisConnector访问。
+    """
 
     PREFIX = "connectorpruning"
 
@@ -35,6 +45,14 @@ class RedisConnectorPrune:
     SUBTASK_PREFIX = f"{PREFIX}+sub"  # connectorpruning+sub
 
     def __init__(self, tenant_id: str | None, id: int, redis: redis.Redis) -> None:
+        """
+        初始化RedisConnectorPrune实例
+        
+        Args:
+            tenant_id: 租户ID
+            id: 连接器ID
+            redis: Redis连接实例
+        """
         self.tenant_id: str | None = tenant_id
         self.id = id
         self.redis = redis
@@ -49,19 +67,35 @@ class RedisConnectorPrune:
         self.subtask_prefix: str = f"{self.SUBTASK_PREFIX}_{id}"
 
     def taskset_clear(self) -> None:
+        """
+        清除任务集合
+        """
         self.redis.delete(self.taskset_key)
 
     def generator_clear(self) -> None:
+        """
+        清除生成器的进度和完成状态
+        """
         self.redis.delete(self.generator_progress_key)
         self.redis.delete(self.generator_complete_key)
 
     def get_remaining(self) -> int:
-        # todo: move into fence
+        """
+        获取剩余待处理任务数量
+        
+        Returns:
+            int: 剩余任务数量
+        """
         remaining = cast(int, self.redis.scard(self.taskset_key))
         return remaining
 
     def get_active_task_count(self) -> int:
-        """Count of active pruning tasks"""
+        """Count of active pruning tasks
+        获取活跃清理任务的数量
+        
+        Returns:
+            int: 活跃任务数量
+        """
         count = 0
         for key in self.redis.scan_iter(RedisConnectorPrune.FENCE_PREFIX + "*"):
             count += 1
@@ -69,12 +103,24 @@ class RedisConnectorPrune:
 
     @property
     def fenced(self) -> bool:
+        """
+        检查是否有fence标记
+        
+        Returns:
+            bool: 是否存在fence标记
+        """
         if self.redis.exists(self.fence_key):
             return True
 
         return False
 
     def set_fence(self, value: bool) -> None:
+        """
+        设置fence标记
+        
+        Args:
+            value: 是否设置fence标记
+        """
         if not value:
             self.redis.delete(self.fence_key)
             return
@@ -84,7 +130,12 @@ class RedisConnectorPrune:
     @property
     def generator_complete(self) -> int | None:
         """the fence payload is an int representing the starting number of
-        pruning tasks to be processed ... just after the generator completes."""
+        pruning tasks to be processed ... just after the generator completes.
+        fence负载是一个整数，表示生成器完成后要处理的清理任务的起始数量。
+        
+        Returns:
+            int | None: 任务数量或None
+        """
         fence_bytes = self.redis.get(self.generator_complete_key)
         if fence_bytes is None:
             return None
@@ -95,7 +146,12 @@ class RedisConnectorPrune:
     @generator_complete.setter
     def generator_complete(self, payload: int | None) -> None:
         """Set the payload to an int to set the fence, otherwise if None it will
-        be deleted"""
+        be deleted
+        设置fence负载为整数，如果为None则删除fence
+        
+        Args:
+            payload: 要设置的负载值
+        """
         if payload is None:
             self.redis.delete(self.generator_complete_key)
             return
@@ -109,6 +165,18 @@ class RedisConnectorPrune:
         db_session: Session,
         lock: RedisLock | None,
     ) -> int | None:
+        """
+        生成清理任务
+        
+        Args:
+            documents_to_prune: 需要清理的文档ID集合
+            celery_app: Celery应用实例
+            db_session: 数据库会话
+            lock: Redis锁实例
+            
+        Returns:
+            int | None: 生成的任务数量或None
+        """
         last_lock_time = time.monotonic()
 
         async_results = []
@@ -152,6 +220,9 @@ class RedisConnectorPrune:
         return len(async_results)
 
     def reset(self) -> None:
+        """
+        重置所有状态，清除所有相关的Redis键
+        """
         self.redis.delete(self.generator_progress_key)
         self.redis.delete(self.generator_complete_key)
         self.redis.delete(self.taskset_key)
@@ -159,13 +230,26 @@ class RedisConnectorPrune:
 
     @staticmethod
     def remove_from_taskset(id: int, task_id: str, r: redis.Redis) -> None:
+        """
+        从任务集合中移除指定任务
+        
+        Args:
+            id: 连接器ID
+            task_id: 任务ID
+            r: Redis连接实例
+        """
         taskset_key = f"{RedisConnectorPrune.TASKSET_PREFIX}_{id}"
         r.srem(taskset_key, task_id)
         return
 
     @staticmethod
     def reset_all(r: redis.Redis) -> None:
-        """Deletes all redis values for all connectors"""
+        """Deletes all redis values for all connectors
+        删除所有连接器的所有Redis值
+        
+        Args:
+            r: Redis连接实例
+        """
         for key in r.scan_iter(RedisConnectorPrune.TASKSET_PREFIX + "*"):
             r.delete(key)
 

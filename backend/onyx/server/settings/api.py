@@ -1,3 +1,11 @@
+"""
+这个文件实现了系统设置相关的API路由处理。
+主要功能包括：
+- 管理员设置的更新和获取
+- 用户设置的获取
+- 系统通知的处理
+"""
+
 from typing import cast
 
 from fastapi import APIRouter
@@ -37,6 +45,12 @@ basic_router = APIRouter(prefix="/settings")
 def put_settings(
     settings: Settings, _: User | None = Depends(current_admin_user)
 ) -> None:
+    """更新系统设置
+    
+    Args:
+        settings: 要存储的设置对象
+        _: 当前管理员用户(通过依赖注入)
+    """
     store_settings(settings)
 
 
@@ -46,7 +60,16 @@ def fetch_settings(
     db_session: Session = Depends(get_session),
 ) -> UserSettings:
     """Settings and notifications are stuffed into this single endpoint to reduce number of
-    Postgres calls"""
+    Postgres calls
+    将设置和通知整合到这个单一端点以减少PostgreSQL调用次数
+    
+    Args:
+        user: 当前用户(通过依赖注入)
+        db_session: 数据库会话(通过依赖注入)
+    
+    Returns:
+        UserSettings: 包含通用设置和用户通知的设置对象
+    """
     general_settings = load_settings()
     settings_notifications = get_settings_notifications(user, db_session)
 
@@ -66,8 +89,23 @@ def fetch_settings(
 def get_settings_notifications(
     user: User | None, db_session: Session
 ) -> list[Notification]:
-    """Get notifications for settings page, including product gating and reindex notifications"""
+    """Get notifications for settings page, including product gating and reindex notifications
+    获取设置页面的通知，包括产品限制和重新索引通知
+    
+    Args:
+        user: 当前用户
+        db_session: 数据库会话
+    
+    Returns:
+        list[Notification]: 通知列表
+    
+    Note:
+        - 检查产品限制通知
+        - 仅向管理员显示重新索引通知
+        - 处理重新索引标志的状态
+    """
     # Check for product gating notification
+    # 检查产品限制通知
     product_notif = get_notifications(
         user=None,
         notif_type=NotificationType.TRIAL_ENDS_TWO_DAYS,
@@ -76,11 +114,13 @@ def get_settings_notifications(
     notifications = [Notification.from_model(product_notif[0])] if product_notif else []
 
     # Only show reindex notifications to admins
+    # 仅向管理员显示重新索引通知
     is_admin = is_user_admin(user)
     if not is_admin:
         return notifications
 
     # Check if reindexing is needed
+    # 检查是否需要重新索引
     kv_store = get_kv_store()
     try:
         needs_index = cast(bool, kv_store.load(KV_REINDEX_KEY))
@@ -92,11 +132,14 @@ def get_settings_notifications(
     except KvKeyNotFoundError:
         # If something goes wrong and the flag is gone, better to not start a reindexing
         # it's a heavyweight long running job and maybe this flag is cleaned up later
+        # 如果出现错误且标志消失，最好不要开始重新索引
+        # 因为这是一个重量级的长期运行任务，可能这个标志稍后会被清理
         logger.warning("Could not find reindex flag")
         return notifications
 
     try:
         # Need a transaction in order to prevent under-counting current notifications
+        # 需要事务以防止当前通知计数不足
         reindex_notifs = get_notifications(
             user=user, notif_type=NotificationType.REINDEX, db_session=db_session
         )
@@ -125,6 +168,6 @@ def get_settings_notifications(
         notifications.append(Notification.from_model(reindex_notif))
         return notifications
     except SQLAlchemyError:
-        logger.exception("Error while processing notifications")
+        logger.exception("Error while processing notifications")  # 处理通知时发生错误
         db_session.rollback()
         return notifications

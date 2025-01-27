@@ -1,3 +1,11 @@
+"""
+此文件主要用于处理搜索结果的后处理操作，包括：
+1. 搜索结果的清理和规范化
+2. 使用语义重排序对搜索结果进行排序
+3. 使用LLM对搜索结果进行过滤和评估
+4. 对搜索结果进行后处理和优化
+"""
+
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing import cast
@@ -33,6 +41,16 @@ logger = setup_logger()
 
 
 def _log_top_section_links(search_flow: str, sections: list[InferenceSection]) -> None:
+    """
+    记录搜索结果中排名最靠前的部分的链接
+
+    参数:
+        search_flow: 搜索流程的类型
+        sections: 需要记录的搜索结果部分列表
+
+    返回:
+        None
+    """
     top_links = [
         section.center_chunk.source_links[0]
         if section.center_chunk.source_links is not None
@@ -43,7 +61,25 @@ def _log_top_section_links(search_flow: str, sections: list[InferenceSection]) -
 
 
 def cleanup_chunks(chunks: list[InferenceChunkUncleaned]) -> list[InferenceChunk]:
+    """
+    清理和规范化搜索结果块
+
+    参数:
+        chunks: 未经清理的搜索结果块列表
+
+    返回:
+        清理后的搜索结果块列表
+    """
     def _remove_title(chunk: InferenceChunkUncleaned) -> str:
+        """
+        从内容中移除标题部分
+        
+        参数:
+            chunk: 未清理的搜索结果块
+            
+        返回:
+            移除标题后的内容字符串
+        """
         if not chunk.title or not chunk.content:
             return chunk.content
 
@@ -62,6 +98,15 @@ def cleanup_chunks(chunks: list[InferenceChunkUncleaned]) -> list[InferenceChunk
         return chunk.content
 
     def _remove_metadata_suffix(chunk: InferenceChunkUncleaned) -> str:
+        """
+        从内容中移除元数据后缀
+        
+        参数:
+            chunk: 未清理的搜索结果块
+            
+        返回:
+            移除元数据后缀后的内容字符串
+        """
         if not chunk.metadata_suffix:
             return chunk.content
         return chunk.content.removesuffix(chunk.metadata_suffix).rstrip(
@@ -83,10 +128,24 @@ def semantic_reranking(
     model_max: int = CROSS_ENCODER_RANGE_MAX,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
 ) -> tuple[list[InferenceChunk], list[int]]:
-    """Reranks chunks based on cross-encoder models. Additionally provides the original indices
+    """
+    基于交叉编码器模型对搜索结果块进行重新排序
+    Reranks chunks based on cross-encoder models. Additionally provides the original indices
     of the chunks in their new sorted order.
+    【中文翻译】：基于交叉编码器模型对区块进行重新排序。同时提供排序后区块的原始索引。
 
     Note: this updates the chunks in place, it updates the chunk scores which came from retrieval
+    【中文翻译】：注意：这会就地更新区块，更新来自检索的区块分数
+
+    参数:
+        query: 搜索查询对象
+        chunks: 需要重新排序的搜索结果块列表
+        model_min: 模型分数的最小值
+        model_max: 模型分数的最大值
+        rerank_metrics_callback: 重新排序指标的回调函数
+
+    返回:
+        包含重新排序后的搜索结果块列表和原始索引的元组
     """
     rerank_settings = query.rerank_settings
 
@@ -170,14 +229,25 @@ def rerank_sections(
     sections_to_rerank: list[InferenceSection],
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
 ) -> list[InferenceSection]:
-    """Chunks are reranked rather than the containing sections, this is because of speed
-    implications, if reranking models have lower latency for long inputs in the future
-    we may rerank on the combined context of the section instead
+    """
+    重新排序搜索结果部分
+    Chunks are reranked rather than the containing sections, this is because of speed implications
+    【中文翻译】：重新排序的是区块而不是包含的部分，这是出于速度考虑
 
     Making the assumption here that often times we want larger Sections to provide context
     for the LLM to determine if a section is useful but for reranking, we don't need to be
     as stringent. If the Section is relevant, we assume that the chunk rerank score will
     also be high.
+    【中文翻译】：这里假设我们通常需要更大的部分来为LLM提供上下文以确定部分是否有用，
+    但对于重新排序，我们不需要那么严格。如果部分相关，我们假设区块重新排序分数也会很高。
+
+    参数:
+        query: 搜索查询对象
+        sections_to_rerank: 需要重新排序的搜索结果部分列表
+        rerank_metrics_callback: 重新排序指标的回调函数
+
+    返回:
+        重新排序后的搜索结果部分列表
     """
     chunks_to_rerank = [section.center_chunk for section in sections_to_rerank]
 
@@ -210,13 +280,27 @@ def filter_sections(
     query: SearchQuery,
     sections_to_filter: list[InferenceSection],
     llm: LLM,
-    # For cost saving, we may turn this on
     use_chunk: bool = False,
 ) -> list[InferenceSection]:
-    """Filters sections based on whether the LLM thought they were relevant to the query.
-    This applies on the section which has more context than the chunk. Hopefully this yields more accurate LLM evaluations.
+    """
+    使用LLM对搜索结果部分进行过滤
+    Filters sections based on whether the LLM thought they were relevant to the query.
+    This applies on the section which has more context than the chunk. 
+    Hopefully this yields more accurate LLM evaluations.
+    【中文翻译】：基于LLM判断的相关性对部分进行过滤。这适用于比区块具有更多上下文的部分。
+    希望这能产生更准确的LLM评估。
 
     Returns a list of the unique chunk IDs that were marked as relevant
+    【中文翻译】：返回被标记为相关的唯一区块ID列表
+
+    参数:
+        query: 搜索查询对象
+        sections_to_filter: 需要过滤的搜索结果部分列表
+        llm: 语言模型对象
+        use_chunk: 是否使用区块而不是完整部分进行评估
+
+    返回:
+        过滤后的搜索结果部分列表
     """
     sections_to_filter = sections_to_filter[: query.max_llm_filter_sections]
 
@@ -250,10 +334,24 @@ def search_postprocessing(
     llm: LLM,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
 ) -> Iterator[list[InferenceSection] | list[SectionRelevancePiece]]:
+    """
+    搜索结果的后处理主函数
+    
+    对检索到的搜索结果进行后处理，包括重新排序和LLM过滤等操作
+
+    参数:
+        search_query: 搜索查询对象
+        retrieved_sections: 检索到的搜索结果部分列表
+        llm: 语言模型对象
+        rerank_metrics_callback: 重新排序指标的回调函数
+
+    返回:
+        生成器，依次产生处理后的搜索结果部分列表和相关性评估结果列表
+    """
     post_processing_tasks: list[FunctionCall] = []
 
     if not retrieved_sections:
-        # Avoids trying to rerank an empty list which throws an error
+        # 避免尝试重新排序空列表，这会引发错误
         yield cast(list[InferenceSection], [])
         yield cast(list[SectionRelevancePiece], [])
         return

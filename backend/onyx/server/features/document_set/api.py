@@ -1,3 +1,11 @@
+"""
+本模块提供了文档集(Document Set)相关的API接口
+主要功能：
+1. 提供文档集的创建、更新、删除等管理功能
+2. 提供文档集的查询和访问控制功能
+3. 处理普通用户和管理员的不同权限请求
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -30,6 +38,20 @@ def create_document_set(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> int:
+    """
+    创建新的文档集
+    
+    参数:
+        document_set_creation_request: 文档集创建请求对象
+        user: 当前用户（必须是管理员或策展人）
+        db_session: 数据库会话
+    
+    返回:
+        int: 新创建的文档集ID
+        
+    异常:
+        HTTPException: 创建失败时抛出400错误
+    """
     fetch_ee_implementation_or_noop(
         "onyx.db.user_group", "validate_object_creation_for_user", None
     )(
@@ -55,6 +77,17 @@ def patch_document_set(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新现有文档集
+    
+    参数:
+        document_set_update_request: 文档集更新请求对象
+        user: 当前用户（必须是管理员或策展人）
+        db_session: 数据库会话
+    
+    异常:
+        HTTPException: 更新失败时抛出400错误
+    """
     fetch_ee_implementation_or_noop(
         "onyx.db.user_group", "validate_object_creation_for_user", None
     )(
@@ -79,6 +112,17 @@ def delete_document_set(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除指定的文档集
+    
+    参数:
+        document_set_id: 要删除的文档集ID
+        user: 当前用户（必须是管理员或策展人）
+        db_session: 数据库会话
+    
+    异常:
+        HTTPException: 删除失败时抛出400错误
+    """
     try:
         mark_document_set_as_to_be_deleted(
             db_session=db_session,
@@ -89,7 +133,7 @@ def delete_document_set(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-"""Endpoints for non-admins"""
+"""非管理员端点 Endpoints for non-admins"""
 
 
 @router.get("/document-set")
@@ -97,9 +141,20 @@ def list_document_sets_for_user(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
     get_editable: bool = Query(
-        False, description="If true, return editable document sets"
+        False, description="If true, return editable document sets"  # 如果为true，返回可编辑的文档集
     ),
 ) -> list[DocumentSet]:
+    """
+    获取用户可访问的文档集列表
+    
+    参数:
+        user: 当前用户
+        db_session: 数据库会话
+        get_editable: 是否只返回可编辑的文档集
+    
+    返回:
+        list[DocumentSet]: 文档集列表
+    """
     return [
         DocumentSet.from_model(ds)
         for ds in fetch_all_document_sets_for_user(
@@ -114,6 +169,17 @@ def document_set_public(
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> CheckDocSetPublicResponse:
+    """
+    检查文档集是否公开可访问
+    
+    参数:
+        check_public_request: 检查公开性请求对象
+        _: 当前用户（用于验证权限）
+        db_session: 数据库会话
+    
+    返回:
+        CheckDocSetPublicResponse: 包含是否公开的响应对象
+    """
     is_public = check_document_sets_are_public(
         document_set_ids=check_public_request.document_set_ids, db_session=db_session
     )

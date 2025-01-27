@@ -1,3 +1,12 @@
+"""
+这个模块提供了查询和聊天相关的API接口实现。
+主要功能包括：
+1. 管理员搜索接口
+2. 标签查询接口
+3. 用户搜索会话管理
+4. 搜索会话详情查询
+"""
+
 from uuid import UUID
 
 from fastapi import APIRouter
@@ -51,6 +60,18 @@ def admin_search(
     db_session: Session = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant_id),
 ) -> AdminSearchResponse:
+    """
+    管理员搜索接口
+    
+    参数:
+        question: 管理员搜索请求对象
+        user: 当前用户对象，必须是管理员或策展人
+        db_session: 数据库会话
+        tenant_id: 租户ID
+    
+    返回:
+        AdminSearchResponse: 包含搜索结果的响应对象
+    """
     query = question.query
     logger.notice(f"Received admin search query: {query}")
     user_acl_filters = build_access_filters_for_user(user, db_session)
@@ -95,6 +116,20 @@ def get_tags(
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> TagResponse:
+    """
+    获取有效标签列表
+    
+    参数:
+        match_pattern: 匹配模式字符串
+        sources: 文档来源列表
+        allow_prefix: 是否允许前缀匹配
+        limit: 返回结果数量限制
+        _: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        TagResponse: 包含标签列表的响应对象
+    """
     if not allow_prefix:
         raise NotImplementedError("Cannot disable prefix match for now")
 
@@ -132,6 +167,19 @@ def get_user_search_sessions(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ChatSessionsResponse:
+    """
+    获取用户搜索会话列表
+    
+    参数:
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        ChatSessionsResponse: 包含用户搜索会话列表的响应对象
+    
+    异常:
+        HTTPException: 当会话不存在或已被删除时抛出
+    """
     user_id = user.id if user is not None else None
 
     try:
@@ -178,6 +226,21 @@ def get_search_session(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> SearchSessionDetailResponse:
+    """
+    获取搜索会话详情
+    
+    参数:
+        session_id: 会话ID
+        is_shared: 是否是共享会话
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        SearchSessionDetailResponse: 包含会话详细信息的响应对象
+    
+    异常:
+        ValueError: 当会话不存在或已被删除时抛出
+    """
     user_id = user.id if user is not None else None
 
     try:

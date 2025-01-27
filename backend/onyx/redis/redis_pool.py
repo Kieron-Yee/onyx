@@ -1,3 +1,14 @@
+"""
+Redis连接池和客户端管理模块
+
+本模块提供了Redis连接池的实现，支持同步和异步连接，以及多租户隔离。
+主要功能包括：
+1. Redis连接池的创建和管理
+2. 多租户Redis客户端的实现
+3. 异步Redis连接的管理
+4. 认证token在Redis中的存储和获取
+"""
+
 import asyncio
 import functools
 import json
@@ -30,11 +41,38 @@ logger = setup_logger()
 
 
 class TenantRedis(redis.Redis):
+    """
+    多租户Redis客户端类
+    
+    通过为每个租户添加独特的前缀来实现多租户数据隔离
+    继承自redis.Redis，重写了键操作相关的方法，自动为所有键添加租户前缀
+    """
+
     def __init__(self, tenant_id: str, *args: Any, **kwargs: Any) -> None:
+        """
+        初始化多租户Redis客户端
+        
+        Args:
+            tenant_id: 租户ID，用于生成键前缀
+            *args: 传递给Redis基类的位置参数
+            **kwargs: 传递给Redis基类的关键字参数
+        """
         super().__init__(*args, **kwargs)
         self.tenant_id: str = tenant_id
 
     def _prefixed(self, key: str | bytes | memoryview) -> str | bytes | memoryview:
+        """
+        为键添加租户前缀
+        
+        Args:
+            key: 原始键值，支持字符串、字节和内存视图类型
+            
+        Returns:
+            添加了租户前缀的键值
+            
+        Raises:
+            TypeError: 当键的类型不支持时抛出
+        """
         prefix: str = f"{self.tenant_id}:"
         if isinstance(key, str):
             if key.startswith(prefix):
@@ -58,6 +96,15 @@ class TenantRedis(redis.Redis):
             raise TypeError(f"Unsupported key type: {type(key)}")
 
     def _prefix_method(self, method: Callable) -> Callable:
+        """
+        装饰器函数，用于为Redis方法添加键前缀处理
+        
+        Args:
+            method: 需要处理的Redis方法
+            
+        Returns:
+            包装后的方法，会自动为键添加租户前缀
+        """
         @functools.wraps(method)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             if "name" in kwargs:
@@ -69,6 +116,15 @@ class TenantRedis(redis.Redis):
         return wrapper
 
     def _prefix_scan_iter(self, method: Callable) -> Callable:
+        """
+        专门处理scan_iter方法的装饰器
+        
+        Args:
+            method: scan_iter方法
+            
+        Returns:
+            包装后的方法，会自动处理键的前缀，并在返回结果时去除前缀
+        """
         @functools.wraps(method)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Prefix the match pattern if provided
@@ -125,6 +181,12 @@ class TenantRedis(redis.Redis):
 
 
 class RedisPool:
+    """
+    Redis连接池单例类
+    
+    管理Redis连接池，确保应用中只创建一个连接池实例
+    提供获取Redis客户端的方法
+    """
     _instance: Optional["RedisPool"] = None
     _lock: threading.Lock = threading.Lock()
     _pool: redis.BlockingConnectionPool
@@ -156,10 +218,25 @@ class RedisPool:
         ssl_cert_reqs: str = REDIS_SSL_CERT_REQS,
         ssl: bool = False,
     ) -> redis.BlockingConnectionPool:
-        """We use BlockingConnectionPool because it will block and wait for a connection
-        rather than error if max_connections is reached. This is far more deterministic
-        behavior and aligned with how we want to use Redis."""
-
+        """
+        创建Redis阻塞连接池
+        
+        我们使用BlockingConnectionPool是因为当达到最大连接数时，它会阻塞等待而不是报错。
+        这种行为更加确定性，且符合我们使用Redis的方式。
+        
+        Args:
+            host: Redis服务器地址
+            port: Redis服务器端口
+            db: 数据库编号
+            password: Redis密码
+            max_connections: 最大连接数
+            ssl_ca_certs: SSL CA证书路径
+            ssl_cert_reqs: SSL证书要求
+            ssl: 是否启用SSL
+            
+        Returns:
+            Redis阻塞连接池实例
+        """
         # Using ConnectionPool is not well documented.
         # Useful examples: https://github.com/redis/redis-py/issues/780
         if ssl:
@@ -213,8 +290,13 @@ _async_lock = asyncio.Lock()
 
 async def get_async_redis_connection() -> aioredis.Redis:
     """
-    Provides a shared async Redis connection, using the same configs (host, port, SSL, etc.).
-    Ensures that the connection is created only once (lazily) and reused for all future calls.
+    获取共享的异步Redis连接
+    
+    使用相同的配置（主机、端口、SSL等）提供共享的异步Redis连接。
+    确保连接只创建一次（懒加载）并在后续调用中重用。
+    
+    Returns:
+        异步Redis连接实例
     """
     global _async_redis_connection
 
@@ -239,6 +321,18 @@ async def get_async_redis_connection() -> aioredis.Redis:
 
 
 async def retrieve_auth_token_data_from_redis(request: Request) -> dict | None:
+    """
+    从Redis中获取认证令牌数据
+    
+    Args:
+        request: FastAPI请求对象
+        
+    Returns:
+        令牌数据字典，如果未找到或发生错误则返回None
+        
+    Raises:
+        ValueError: 当发生意外错误时抛出
+    """
     token = request.cookies.get("fastapiusersauth")
     if not token:
         logger.debug("No auth token cookie found")
@@ -267,6 +361,13 @@ async def retrieve_auth_token_data_from_redis(request: Request) -> dict | None:
 
 
 def redis_lock_dump(lock: RedisLock, r: Redis) -> None:
+    """
+    输出Redis锁的诊断信息
+    
+    Args:
+        lock: Redis锁对象
+        r: Redis客户端实例
+    """
     # diagnostic logging for lock errors
     name = lock.name
     ttl = r.ttl(name)

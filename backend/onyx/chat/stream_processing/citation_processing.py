@@ -1,3 +1,11 @@
+"""
+此文件用于处理聊天过程中的引用处理。
+主要功能包括：
+1. 处理LLM输出中的引用标记
+2. 管理引用的顺序和显示
+3. 处理引用的格式化和链接生成
+"""
+
 import re
 from collections.abc import Generator
 
@@ -13,11 +21,31 @@ logger = setup_logger()
 
 
 def in_code_block(llm_text: str) -> bool:
+    """
+    判断当前文本是否在代码块内
+    
+    Args:
+        llm_text (str): 需要检查的文本
+    
+    Returns:
+        bool: 如果在代码块内返回True，否则返回False
+    """
     count = llm_text.count(TRIPLE_BACKTICK)
     return count % 2 != 0
 
 
 class CitationProcessor:
+    """
+    引用处理器类
+    
+    用于处理文本中的引用标记，管理引用的顺序，并生成适当的引用格式。
+    
+    Attributes:
+        context_docs: 上下文文档列表
+        final_doc_id_to_rank_map: 最终文档ID到排名的映射
+        display_doc_id_to_rank_map: 显示用的文档ID到排名的映射
+        stop_stream: 停止流的标记
+    """
     def __init__(
         self,
         context_docs: list[LlmDoc],
@@ -25,6 +53,15 @@ class CitationProcessor:
         display_doc_id_to_rank_map: DocumentIdOrderMapping,
         stop_stream: str | None = STOP_STREAM_PAT,
     ):
+        """
+        初始化引用处理器
+        
+        Args:
+            context_docs: 上下文文档列表
+            final_doc_id_to_rank_map: 最终文档排序映射
+            display_doc_id_to_rank_map: 显示用文档排序映射
+            stop_stream: 停止流的模式
+        """
         self.context_docs = context_docs
         self.final_doc_id_to_rank_map = final_doc_id_to_rank_map
         self.display_doc_id_to_rank_map = display_doc_id_to_rank_map
@@ -33,7 +70,7 @@ class CitationProcessor:
         self.display_order_mapping = display_doc_id_to_rank_map.order_mapping
         self.llm_out = ""
         self.max_citation_num = len(context_docs)
-        self.citation_order: list[int] = []  # order of citations in the LLM output
+        self.citation_order: list[int] = []  # LLM输出中引用的顺序
         self.curr_segment = ""
         self.cited_inds: set[int] = set()
         self.hold = ""
@@ -43,11 +80,27 @@ class CitationProcessor:
     def process_token(
         self, token: str | None
     ) -> Generator[OnyxAnswerPiece | CitationInfo, None, None]:
-        # None -> end of stream
+        """
+        处理输入的token
+        
+        Args:
+            token: 输入的token，如果为None表示流结束
+            
+        Yields:
+            OnyxAnswerPiece: 处理后的答案片段
+            CitationInfo: 引用信息
+            
+        Note:
+            - 处理代码块格式
+            - 识别和处理引用标记
+            - 管理引用顺序和链接
+        """
+        # None -> end of stream (流结束)
         if token is None:
             yield OnyxAnswerPiece(answer_piece=self.curr_segment)
             return
 
+        # 处理停止流模式
         if self.stop_stream:
             next_hold = self.hold + token
             if self.stop_stream in next_hold:
@@ -61,7 +114,7 @@ class CitationProcessor:
         self.curr_segment += token
         self.llm_out += token
 
-        # Handle code blocks without language tags
+        # 处理没有语言标签的代码块
         if "`" in self.curr_segment:
             if self.curr_segment.endswith("`"):
                 pass
@@ -70,8 +123,10 @@ class CitationProcessor:
                 if piece_that_comes_after == "\n" and in_code_block(self.llm_out):
                     self.curr_segment = self.curr_segment.replace("```", "```plaintext")
 
+        # 引用标记的正则表达式模式
         citation_pattern = r"\[(\d+)\]|\[\[(\d+)\]\]"  # [1], [[1]], etc.
         citations_found = list(re.finditer(citation_pattern, self.curr_segment))
+        # 可能的引用标记的正则表达式模式
         possible_citation_pattern = r"(\[+\d*$)"  # [1, [, [[, [[2, etc.
         possible_citation_found = re.search(
             possible_citation_pattern, self.curr_segment

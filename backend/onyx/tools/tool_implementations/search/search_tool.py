@@ -1,3 +1,8 @@
+"""
+该文件实现了搜索工具的核心功能，用于在用户的知识库中执行语义搜索。
+主要包含SearchTool类，该类提供了搜索功能的实现，包括查询处理、文档检索和结果处理等功能。
+"""
+
 import json
 from collections.abc import Generator
 from typing import Any
@@ -56,13 +61,28 @@ from onyx.utils.special_types import JSON_ro
 
 logger = setup_logger()
 
+# 搜索响应摘要ID常量
 SEARCH_RESPONSE_SUMMARY_ID = "search_response_summary"
+# 搜索文档内容ID常量
 SEARCH_DOC_CONTENT_ID = "search_doc_content"
+# 章节相关性列表ID常量
 SECTION_RELEVANCE_LIST_ID = "section_relevance_list"
+# 搜索评估ID常量
 SEARCH_EVALUATION_ID = "llm_doc_eval"
 
 
 class SearchResponseSummary(BaseModel):
+    """
+    搜索响应摘要模型类
+    
+    属性:
+        top_sections: 顶部段落列表
+        rephrased_query: 重写后的查询语句
+        predicted_flow: 预测的查询流程
+        predicted_search: 预测的搜索类型
+        final_filters: 最终的索引过滤器
+        recency_bias_multiplier: 时效性偏差乘数
+    """
     top_sections: list[InferenceSection]
     rephrased_query: str | None = None
     predicted_flow: QueryFlow | None
@@ -71,6 +91,12 @@ class SearchResponseSummary(BaseModel):
     recency_bias_multiplier: float
 
 
+# 在用户的知识库中运行语义搜索。这是默认的行为。只有在以下情况下才不应使用此工具：
+
+# - 聊天历史中已经有足够的信息可以完整且准确地回答查询，且额外的信息或细节价值很小或没有价值。
+# - 查询是某种不需要额外信息就能处理的请求。
+
+# 提示：如果你不熟悉用户输入或认为用户输入可能是错误的，请使用此工具。
 SEARCH_TOOL_DESCRIPTION = """
 Runs a semantic search over the user's knowledge base. The default behavior is to use this tool. \
 The only scenario where you should not use this tool is if:
@@ -84,6 +110,12 @@ HINT: if you are unfamiliar with the user input OR think the user input is a typ
 
 
 class SearchTool(Tool):
+    """
+    搜索工具类，继承自Tool类
+    
+    提供了在用户知识库中执行语义搜索的功能，包括查询处理、文档检索和结果处理。
+    """
+
     _NAME = "run_search"
     _DISPLAY_NAME = "Search Tool"
     _DESCRIPTION = SEARCH_TOOL_DESCRIPTION
@@ -109,6 +141,27 @@ class SearchTool(Tool):
         bypass_acl: bool = False,
         rerank_settings: RerankingDetails | None = None,
     ) -> None:
+        """
+        初始化SearchTool实例
+        
+        参数:
+            db_session: 数据库会话
+            user: 用户对象
+            persona: 角色对象
+            retrieval_options: 检索选项
+            prompt_config: 提示配置
+            llm: 语言模型实例
+            fast_llm: 快速语言模型实例
+            pruning_config: 文档剪枝配置
+            answer_style_config: 答案样式配置
+            evaluation_type: LLM评估类型
+            selected_sections: 已选择的章节列表
+            chunks_above: 上文chunk数量
+            chunks_below: 下文chunk数量
+            full_doc: 是否返回完整文档
+            bypass_acl: 是否绕过访问控制
+            rerank_settings: 重排序设置
+        """
         self.user = user
         self.persona = persona
         self.retrieval_options = retrieval_options
@@ -176,6 +229,12 @@ class SearchTool(Tool):
     """For explicit tool calling"""
 
     def tool_definition(self) -> dict:
+        """
+        定义工具的接口规范
+        
+        返回值:
+            包含工具名称、描述和参数定义的字典
+        """
         return {
             "type": "function",
             "function": {
@@ -197,6 +256,15 @@ class SearchTool(Tool):
     def build_tool_message_content(
         self, *args: ToolResponse
     ) -> str | list[str | dict[str, Any]]:
+        """
+        构建工具的响应消息内容
+        
+        参数:
+            args: 工具响应对象列表
+            
+        返回值:
+            格式化的响应消息内容
+        """
         final_context_docs_response = next(
             response for response in args if response.id == FINAL_CONTEXT_DOCUMENTS_ID
         )
@@ -220,6 +288,18 @@ class SearchTool(Tool):
         llm: LLM,
         force_run: bool = False,
     ) -> dict[str, Any] | None:
+        """
+        为不支持工具调用的LLM获取参数
+        
+        参数:
+            query: 查询字符串
+            history: 历史消息列表
+            llm: 语言模型实例
+            force_run: 是否强制运行
+            
+        返回值:
+            参数字典或None
+        """
         if not force_run and not check_if_need_search(
             query=query, history=history, llm=llm
         ):
@@ -235,6 +315,15 @@ class SearchTool(Tool):
     def _build_response_for_specified_sections(
         self, query: str
     ) -> Generator[ToolResponse, None, None]:
+        """
+        为指定章节构建响应
+        
+        参数:
+            query: 查询字符串
+            
+        返回值:
+            生成器，产生工具响应对象
+        """
         if self.selected_sections is None:
             raise ValueError("Sections must be specified")
 
@@ -251,6 +340,7 @@ class SearchTool(Tool):
         )
 
         # Build selected sections for specified documents
+        # 为指定文档构建选定的章节
         selected_sections = [
             SectionRelevancePiece(
                 relevant=True,
@@ -282,6 +372,15 @@ class SearchTool(Tool):
         yield ToolResponse(id=FINAL_CONTEXT_DOCUMENTS_ID, response=llm_docs)
 
     def run(self, **kwargs: str) -> Generator[ToolResponse, None, None]:
+        """
+        执行搜索工具的主要逻辑
+        
+        参数:
+            kwargs: 包含查询字符串的关键字参数
+            
+        返回值:
+            生成器，产生工具响应对象
+        """
         query = cast(str, kwargs["query"])
 
         if self.selected_sections:
@@ -366,6 +465,19 @@ class SearchTool(Tool):
         yield ToolResponse(id=FINAL_CONTEXT_DOCUMENTS_ID, response=llm_docs)
 
     def final_result(self, *args: ToolResponse) -> JSON_ro:
+        """
+        处理最终结果
+        
+        参数:
+            args: 工具响应对象列表
+            
+        返回值:
+            JSON格式的最终结果
+            
+        注释:
+            需要使用json.loads(doc.json())是因为有些子字段默认不可序列化（如datetime）
+            这样可以强制pydantic为我们生成JSON可序列化的格式
+        """
         final_docs = cast(
             list[LlmDoc],
             next(arg.response for arg in args if arg.id == FINAL_CONTEXT_DOCUMENTS_ID),
@@ -382,6 +494,18 @@ class SearchTool(Tool):
         tool_responses: list[ToolResponse],
         using_tool_calling_llm: bool,
     ) -> AnswerPromptBuilder:
+        """
+        构建下一个提示
+        
+        参数:
+            prompt_builder: 答案提示构建器
+            tool_call_summary: 工具调用摘要
+            tool_responses: 工具响应列表
+            using_tool_calling_llm: 是否使用支持工具调用的LLM
+            
+        返回值:
+            更新后的答案提示构建器
+        """
         return build_next_prompt_for_search_like_tool(
             prompt_builder=prompt_builder,
             tool_call_summary=tool_call_summary,

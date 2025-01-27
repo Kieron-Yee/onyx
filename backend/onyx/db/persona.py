@@ -1,3 +1,8 @@
+"""
+这个文件主要负责系统中Persona(角色)相关的数据库操作。
+包括创建、更新、获取和删除Persona,以及管理Persona的权限、提示词、工具等相关功能。
+"""
+
 from collections.abc import Sequence
 from datetime import datetime
 from functools import lru_cache
@@ -45,15 +50,23 @@ logger = setup_logger()
 def _add_user_filters(
     stmt: Select, user: User | None, get_editable: bool = True
 ) -> Select:
-    # If user is None, assume the user is an admin or auth is disabled
+    """
+    为查询语句添加用户过滤条件
+    
+    参数:
+        stmt: 查询语句对象
+        user: 用户对象,None表示admin或禁用认证
+        get_editable: 是否只获取可编辑的内容
+    """
+    # 如果用户是None,假定用户是admin或auth被禁用
     if user is None or user.role == UserRole.ADMIN:
         return stmt
 
     Persona__UG = aliased(Persona__UserGroup)
     User__UG = aliased(User__UserGroup)
     """
-    Here we select cc_pairs by relation:
-    User -> User__UserGroup -> Persona__UserGroup -> Persona
+    这里我们通过关系选择cc_pairs:
+    用户 -> User__UserGroup -> Persona__UserGroup -> Persona
     """
     stmt = (
         stmt.outerjoin(Persona__UG)
@@ -67,15 +80,12 @@ def _add_user_filters(
         )
     )
     """
-    Filter Personas by:
-    - if the user is in the user_group that owns the Persona
-    - if the user is not a global_curator, they must also have a curator relationship
-    to the user_group
-    - if editing is being done, we also filter out Personas that are owned by groups
-    that the user isn't a curator for
-    - if we are not editing, we show all Personas in the groups the user is a curator
-    for (as well as public Personas)
-    - if we are not editing, we return all Personas directly connected to the user
+    过滤Persona:
+    - 如果用户在拥有Persona的user_group中
+    - 如果用户不是global_curator,他们还必须与user_group有curator关系
+    - 如果正在编辑,我们还会过滤掉用户不是curator的组拥有的Persona
+    - 如果我们不在编辑,我们显示用户是curator的组中的所有Persona(以及公共Persona)
+    - 如果我们不在编辑,我们返回直接连接到用户的所有Persona
     """
     where_clause = User__UserGroup.user_id == user.id
     if user.role == UserRole.CURATOR and get_editable:
@@ -99,12 +109,18 @@ def _add_user_filters(
     return stmt.where(where_clause)
 
 
-# fetch_persona_by_id is used to fetch a persona by its ID. It is used to fetch a persona by its ID.
-
-
 def fetch_persona_by_id(
     db_session: Session, persona_id: int, user: User | None, get_editable: bool = True
 ) -> Persona:
+    """
+    根据ID获取一个Persona对象
+    
+    参数:
+        db_session: 数据库会话
+        persona_id: Persona的ID
+        user: 当前用户,用于权限验证
+        get_editable: 是否只获取可编辑的内容
+    """
     stmt = select(Persona).where(Persona.id == persona_id).distinct()
     stmt = _add_user_filters(stmt=stmt, user=user, get_editable=get_editable)
     persona = db_session.scalars(stmt).one_or_none()
@@ -119,22 +135,27 @@ def fetch_persona_by_id(
 def get_best_persona_id_for_user(
     db_session: Session, user: User | None, persona_id: int | None = None
 ) -> int | None:
+    """
+    获取对指定用户最合适的Persona ID
+    
+    如果提供了persona_id且用户有权访问,则返回该ID
+    否则返回用户可访问的优先级最高的Persona ID
+    """
     if persona_id is not None:
         stmt = select(Persona).where(Persona.id == persona_id).distinct()
         stmt = _add_user_filters(
             stmt=stmt,
             user=user,
-            # We don't want to filter by editable here, we just want to see if the
-            # persona is usable by the user
+            # 我们不想在这里按可编辑过滤,我们只想查看persona是否对用户可用
             get_editable=False,
         )
         persona = db_session.scalars(stmt).one_or_none()
         if persona:
             return persona.id
 
-    # If the persona is not found, or the slack bot is using doc sets instead of personas,
-    # we need to find the best persona for the user
-    # This is the persona with the highest display priority that the user has access to
+    # 如果未找到persona,或slack bot使用文档集而不是persona,
+    # 我们需要找到最适合用户的persona
+    # 这是用户有权访问的显示优先级最高的persona
     stmt = select(Persona).order_by(Persona.display_priority.desc()).distinct()
     stmt = _add_user_filters(stmt=stmt, user=user, get_editable=True)
     persona = db_session.scalars(stmt).one_or_none()
@@ -144,8 +165,16 @@ def get_best_persona_id_for_user(
 def _get_persona_by_name(
     persona_name: str, user: User | None, db_session: Session
 ) -> Persona | None:
-    """Admins can see all, regular users can only fetch their own.
-    If user is None, assume the user is an admin or auth is disabled."""
+    """
+    根据名称获取Persona对象
+    
+    参数:
+        persona_name: Persona的名称
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
+    # 管理员可以查看所有,普通用户只能获取自己的
+    # 如果用户是None,假定用户是admin或auth被禁用
     stmt = select(Persona).where(Persona.name == persona_name)
     if user and user.role != UserRole.ADMIN:
         stmt = stmt.where(Persona.user_id == user.id)
@@ -159,6 +188,15 @@ def make_persona_private(
     group_ids: list[int] | None,
     db_session: Session,
 ) -> None:
+    """
+    将Persona设为私有
+    
+    参数:
+        persona_id: Persona的ID
+        user_ids: 允许访问的用户ID列表
+        group_ids: 允许访问的用户组ID列表
+        db_session: 数据库会话
+    """
     if user_ids is not None:
         db_session.query(Persona__User).filter(
             Persona__User.persona_id == persona_id
@@ -169,9 +207,9 @@ def make_persona_private(
 
         db_session.commit()
 
-    # May cause error if someone switches down to MIT from EE
+    # 如果有人从EE切换到MIT,可能会导致错误
     if group_ids:
-        raise NotImplementedError("Onyx MIT does not support private Personas")
+        raise NotImplementedError("Onyx MIT does not支持私有Persona")
 
 
 def create_update_persona(
@@ -180,9 +218,16 @@ def create_update_persona(
     user: User | None,
     db_session: Session,
 ) -> PersonaSnapshot:
-    """Higher level function than upsert_persona, although either is valid to use."""
-    # Permission to actually use these is checked later
-
+    """
+    创建或更新Persona
+    
+    参数:
+        persona_id: Persona的ID,如果为None则创建新Persona
+        create_persona_request: 创建Persona的请求数据
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
+    # 实际使用这些的权限稍后检查
     try:
         persona_data = {
             "persona_id": persona_id,
@@ -197,7 +242,7 @@ def create_update_persona(
             "onyx.db.persona", "make_persona_private"
         )
 
-        # Privatize Persona
+        # 将Persona设为私有
         versioned_make_persona_private(
             persona_id=persona.id,
             user_ids=create_persona_request.users,
@@ -206,7 +251,7 @@ def create_update_persona(
         )
 
     except ValueError as e:
-        logger.exception("Failed to create persona")
+        logger.exception("创建Persona失败")
         raise HTTPException(status_code=400, detail=str(e))
 
     return PersonaSnapshot.from_model(persona)
@@ -218,21 +263,27 @@ def update_persona_shared_users(
     user: User | None,
     db_session: Session,
 ) -> None:
-    """Simplified version of `create_update_persona` which only touches the
-    accessibility rather than any of the logic (e.g. prompt, connected data sources,
-    etc.)."""
+    """
+    更新Persona的共享用户
+    
+    参数:
+        persona_id: Persona的ID
+        user_ids: 共享用户的ID列表
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
     persona = fetch_persona_by_id(
         db_session=db_session, persona_id=persona_id, user=user, get_editable=True
     )
 
     if persona.is_public:
-        raise HTTPException(status_code=400, detail="Cannot share public persona")
+        raise HTTPException(status_code=400, detail="不能共享公共Persona")
 
     versioned_make_persona_private = fetch_versioned_implementation(
         "onyx.db.persona", "make_persona_private"
     )
 
-    # Privatize Persona
+    # 将Persona设为私有
     versioned_make_persona_private(
         persona_id=persona_id,
         user_ids=user_ids,
@@ -247,11 +298,20 @@ def update_persona_public_status(
     db_session: Session,
     user: User | None,
 ) -> None:
+    """
+    更新Persona的公共状态
+    
+    参数:
+        persona_id: Persona的ID
+        is_public: 是否设为公共
+        db_session: 数据库会话
+        user: 当前用户,用于权限验证
+    """
     persona = fetch_persona_by_id(
         db_session=db_session, persona_id=persona_id, user=user, get_editable=True
     )
     if user and user.role != UserRole.ADMIN and persona.user_id != user.id:
-        raise ValueError("You don't have permission to modify this persona")
+        raise ValueError("你没有权限修改此Persona")
 
     persona.is_public = is_public
     db_session.commit()
@@ -263,6 +323,15 @@ def get_prompts(
     include_default: bool = True,
     include_deleted: bool = False,
 ) -> Sequence[Prompt]:
+    """
+    获取提示词列表
+    
+    参数:
+        user_id: 用户ID,如果为None则获取所有用户的提示词
+        db_session: 数据库会话
+        include_default: 是否包含默认提示词
+        include_deleted: 是否包含已删除的提示词
+    """
     stmt = select(Prompt).where(
         or_(Prompt.user_id == user_id, Prompt.user_id.is_(None))
     )
@@ -276,7 +345,6 @@ def get_prompts(
 
 
 def get_personas(
-    # if user is `None` assume the user is an admin or auth is disabled
     user: User | None,
     db_session: Session,
     get_editable: bool = True,
@@ -285,6 +353,18 @@ def get_personas(
     include_deleted: bool = False,
     joinedload_all: bool = False,
 ) -> Sequence[Persona]:
+    """
+    获取Persona列表
+    
+    参数:
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+        get_editable: 是否只获取可编辑的内容
+        include_default: 是否包含默认Persona
+        include_slack_bot_personas: 是否包含Slack Bot Persona
+        include_deleted: 是否包含已删除的Persona
+        joinedload_all: 是否加载所有关联数据
+    """
     stmt = select(Persona).distinct()
     stmt = _add_user_filters(stmt=stmt, user=user, get_editable=get_editable)
     if not include_default:
@@ -311,6 +391,14 @@ def mark_persona_as_deleted(
     user: User | None,
     db_session: Session,
 ) -> None:
+    """
+    将Persona标记为已删除
+    
+    参数:
+        persona_id: Persona的ID
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
     persona = get_persona_by_id(persona_id=persona_id, user=user, db_session=db_session)
     persona.deleted = True
     db_session.commit()
@@ -321,6 +409,14 @@ def mark_persona_as_not_deleted(
     user: User | None,
     db_session: Session,
 ) -> None:
+    """
+    将Persona标记为未删除
+    
+    参数:
+        persona_id: Persona的ID
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
     persona = get_persona_by_id(
         persona_id=persona_id, user=user, db_session=db_session, include_deleted=True
     )
@@ -328,12 +424,20 @@ def mark_persona_as_not_deleted(
         persona.deleted = False
         db_session.commit()
     else:
-        raise ValueError(f"Persona with ID {persona_id} is not deleted.")
+        raise ValueError(f"ID为{persona_id}的Persona未被删除.")
 
 
 def mark_delete_persona_by_name(
     persona_name: str, db_session: Session, is_default: bool = True
 ) -> None:
+    """
+    根据名称将Persona标记为已删除
+    
+    参数:
+        persona_name: Persona的名称
+        db_session: 数据库会话
+        is_default: 是否为默认Persona
+    """
     stmt = (
         update(Persona)
         .where(Persona.name == persona_name, Persona.builtin_persona == is_default)
@@ -348,11 +452,17 @@ def update_all_personas_display_priority(
     display_priority_map: dict[int, int],
     db_session: Session,
 ) -> None:
-    """Updates the display priority of all lives Personas"""
+    """
+    更新所有Persona的显示优先级
+    
+    参数:
+        display_priority_map: Persona ID到显示优先级的映射
+        db_session: 数据库会话
+    """
     personas = get_personas(user=None, db_session=db_session)
     available_persona_ids = {persona.id for persona in personas}
     if available_persona_ids != set(display_priority_map.keys()):
-        raise ValueError("Invalid persona IDs provided")
+        raise ValueError("提供的Persona ID无效")
 
     for persona in personas:
         persona.display_priority = display_priority_map[persona.id]
@@ -373,6 +483,23 @@ def upsert_prompt(
     default_prompt: bool = True,
     commit: bool = True,
 ) -> Prompt:
+    """
+    插入或更新提示词
+    
+    参数:
+        user: 当前用户,用于权限验证
+        name: 提示词名称
+        description: 提示词描述
+        system_prompt: 系统提示词
+        task_prompt: 任务提示词
+        include_citations: 是否包含引用
+        datetime_aware: 是否包含日期时间
+        personas: 关联的Persona列表
+        db_session: 数据库会话
+        prompt_id: 提示词ID,如果为None则创建新提示词
+        default_prompt: 是否为默认提示词
+        commit: 是否提交事务
+    """
     if prompt_id is not None:
         prompt = db_session.query(Prompt).filter_by(id=prompt_id).first()
     else:
@@ -380,7 +507,7 @@ def upsert_prompt(
 
     if prompt:
         if not default_prompt and prompt.default_prompt:
-            raise ValueError("Cannot update default prompt with non-default.")
+            raise ValueError("不能使用非默认提示词更新默认提示词.")
 
         prompt.name = name
         prompt.description = description
@@ -412,7 +539,7 @@ def upsert_prompt(
     if commit:
         db_session.commit()
     else:
-        # Flush the session so that the Prompt has an ID
+        # 刷新会话以便Prompt有ID
         db_session.flush()
 
     return prompt
@@ -450,11 +577,39 @@ def upsert_persona(
     chunks_below: int = CONTEXT_CHUNKS_BELOW,
 ) -> Persona:
     """
-    NOTE: This operation cannot update persona configuration options that
-    are core to the persona, such as its display priority and
-    whether or not the assistant is a built-in / default assistant
+    插入或更新Persona
+    
+    参数:
+        user: 当前用户,用于权限验证
+        name: Persona名称
+        description: Persona描述
+        num_chunks: 块数量
+        llm_relevance_filter: 是否启用LLM相关性过滤
+        llm_filter_extraction: 是否启用LLM过滤提取
+        recency_bias: 最近偏好设置
+        llm_model_provider_override: LLM模型提供者覆盖
+        llm_model_version_override: LLM模型版本覆盖
+        starter_messages: 启动消息列表
+        is_public: 是否为公共Persona
+        db_session: 数据库会话
+        prompt_ids: 提示词ID列表
+        document_set_ids: 文档集ID列表
+        tool_ids: 工具ID列表
+        persona_id: Persona ID,如果为None则创建新Persona
+        commit: 是否提交事务
+        icon_color: 图标颜色
+        icon_shape: 图标形状
+        uploaded_image_id: 上传的图片ID
+        display_priority: 显示优先级
+        is_visible: 是否可见
+        remove_image: 是否移除图片
+        search_start_date: 搜索开始日期
+        builtin_persona: 是否为内置Persona
+        is_default_persona: 是否为默认Persona
+        category_id: 类别ID
+        chunks_above: 上方块数量
+        chunks_below: 下方块数量
     """
-
     if persona_id is not None:
         existing_persona = db_session.query(Persona).filter_by(id=persona_id).first()
     else:
@@ -462,14 +617,14 @@ def upsert_persona(
             persona_name=name, user=user, db_session=db_session
         )
 
-    # Fetch and attach tools by IDs
+    # 获取并附加工具
     tools = None
     if tool_ids is not None:
         tools = db_session.query(Tool).filter(Tool.id.in_(tool_ids)).all()
         if not tools and tool_ids:
-            raise ValueError("Tools not found")
+            raise ValueError("工具未找到")
 
-    # Fetch and attach document_sets by IDs
+    # 获取并附加文档集
     document_sets = None
     if document_set_ids is not None:
         document_sets = (
@@ -478,31 +633,30 @@ def upsert_persona(
             .all()
         )
         if not document_sets and document_set_ids:
-            raise ValueError("document_sets not found")
+            raise ValueError("文档集未找到")
 
-    # Fetch and attach prompts by IDs
+    # 获取并附加提示词
     prompts = None
     if prompt_ids is not None:
         prompts = db_session.query(Prompt).filter(Prompt.id.in_(prompt_ids)).all()
 
     if prompts is not None and len(prompts) == 0:
         raise ValueError(
-            f"Invalid Persona config, no valid prompts "
-            f"specified. Specified IDs were: '{prompt_ids}'"
+            f"无效的Persona配置,未指定有效的提示词. 指定的ID为: '{prompt_ids}'"
         )
 
-    # ensure all specified tools are valid
+    # 确保所有指定的工具有效
     if tools:
         validate_persona_tools(tools)
 
     if existing_persona:
-        # Built-in personas can only be updated through YAML configuration.
-        # This ensures that core system personas are not modified unintentionally.
+        # 内置Persona只能通过YAML配置更新
+        # 这确保了核心系统Persona不会被意外修改
         if existing_persona.builtin_persona and not builtin_persona:
-            raise ValueError("Cannot update builtin persona with non-builtin.")
+            raise ValueError("不能使用非内置Persona更新内置Persona.")
 
-        # this checks if the user has permission to edit the persona
-        # will raise an Exception if the user does not have permission
+        # 检查用户是否有权限编辑Persona
+        # 如果用户没有权限,将引发异常
         existing_persona = fetch_persona_by_id(
             db_session=db_session,
             persona_id=existing_persona.id,
@@ -510,9 +664,9 @@ def upsert_persona(
             get_editable=True,
         )
 
-        # The following update excludes `default`, `built-in`, and display priority.
-        # Display priority is handled separately in the `display-priority` endpoint.
-        # `default` and `built-in` properties can only be set when creating a persona.
+        # 以下更新不包括`default`, `built-in`和显示优先级
+        # 显示优先级在`display-priority`端点中单独处理
+        # `default`和`built-in`属性只能在创建Persona时设置
         existing_persona.name = name
         existing_persona.description = description
         existing_persona.num_chunks = num_chunks
@@ -524,7 +678,7 @@ def upsert_persona(
         existing_persona.llm_model_provider_override = llm_model_provider_override
         existing_persona.llm_model_version_override = llm_model_version_override
         existing_persona.starter_messages = starter_messages
-        existing_persona.deleted = False  # Un-delete if previously deleted
+        existing_persona.deleted = False  # 如果之前已删除,则取消删除
         existing_persona.is_public = is_public
         existing_persona.icon_color = icon_color
         existing_persona.icon_shape = icon_shape
@@ -533,8 +687,7 @@ def upsert_persona(
         existing_persona.is_visible = is_visible
         existing_persona.search_start_date = search_start_date
         existing_persona.category_id = category_id
-        # Do not delete any associations manually added unless
-        # a new updated list is provided
+        # 不要删除任何手动添加的关联,除非提供了新的更新列表
         if document_sets is not None:
             existing_persona.document_sets.clear()
             existing_persona.document_sets = document_sets or []
@@ -546,7 +699,7 @@ def upsert_persona(
         if tools is not None:
             existing_persona.tools = tools or []
 
-        # We should only update display priority if it is not already set
+        # 仅在未设置显示优先级时更新显示优先级
         if existing_persona.display_priority is None:
             existing_persona.display_priority = display_priority
 
@@ -555,8 +708,7 @@ def upsert_persona(
     else:
         if not prompts:
             raise ValueError(
-                "Invalid Persona config. "
-                "Must specify at least one prompt for a new persona."
+                "无效的Persona配置. 必须为新Persona指定至少一个提示词."
             )
 
         new_persona = Persona(
@@ -592,7 +744,7 @@ def upsert_persona(
     if commit:
         db_session.commit()
     else:
-        # flush the session so that the persona has an ID
+        # 刷新会话以便Persona有ID
         db_session.flush()
 
     return persona
@@ -603,6 +755,14 @@ def mark_prompt_as_deleted(
     user: User | None,
     db_session: Session,
 ) -> None:
+    """
+    将提示词标记为已删除
+    
+    参数:
+        prompt_id: 提示词ID
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
     prompt = get_prompt_by_id(prompt_id=prompt_id, user=user, db_session=db_session)
     prompt.deleted = True
     db_session.commit()
@@ -611,8 +771,12 @@ def mark_prompt_as_deleted(
 def delete_old_default_personas(
     db_session: Session,
 ) -> None:
-    """Note, this locks out the Summarize and Paraphrase personas for now
-    Need a more graceful fix later or those need to never have IDs"""
+    """
+    删除旧的默认Persona
+    
+    注意,这会暂时锁定Summarize和Paraphrase Persona
+    需要稍后更优雅的修复,或者这些Persona永远不应有ID
+    """
     stmt = (
         update(Persona)
         .where(Persona.builtin_persona, Persona.id > 0)
@@ -629,6 +793,15 @@ def update_persona_visibility(
     db_session: Session,
     user: User | None = None,
 ) -> None:
+    """
+    更新Persona的可见性
+    
+    参数:
+        persona_id: Persona的ID
+        is_visible: 是否可见
+        db_session: 数据库会话
+        user: 当前用户,用于权限验证
+    """
     persona = fetch_persona_by_id(
         db_session=db_session, persona_id=persona_id, user=user, get_editable=True
     )
@@ -638,15 +811,27 @@ def update_persona_visibility(
 
 
 def validate_persona_tools(tools: list[Tool]) -> None:
+    """
+    验证Persona的工具
+    
+    参数:
+        tools: 工具列表
+    """
     for tool in tools:
         if tool.name == "InternetSearchTool" and not BING_API_KEY:
             raise ValueError(
-                "Bing API key not found, please contact your Onyx admin to get it added!"
+                "未找到Bing API密钥,请联系您的Onyx管理员以获取添加!"
             )
 
 
 def get_prompts_by_ids(prompt_ids: list[int], db_session: Session) -> list[Prompt]:
-    """Unsafe, can fetch prompts from all users"""
+    """
+    根据ID列表获取提示词
+    
+    参数:
+        prompt_ids: 提示词ID列表
+        db_session: 数据库会话
+    """
     if not prompt_ids:
         return []
     prompts = db_session.scalars(
@@ -662,10 +847,19 @@ def get_prompt_by_id(
     db_session: Session,
     include_deleted: bool = False,
 ) -> Prompt:
+    """
+    根据ID获取提示词
+    
+    参数:
+        prompt_id: 提示词ID
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+        include_deleted: 是否包含已删除的提示词
+    """
     stmt = select(Prompt).where(Prompt.id == prompt_id)
 
-    # if user is not specified OR they are an admin, they should
-    # have access to all prompts, so this where clause is not needed
+    # 如果未指定用户或他们是管理员,他们应该
+    # 访问所有提示词,因此不需要此where子句
     if user and user.role != UserRole.ADMIN:
         stmt = stmt.where(or_(Prompt.user_id == user.id, Prompt.user_id.is_(None)))
 
@@ -677,47 +871,68 @@ def get_prompt_by_id(
 
     if prompt is None:
         raise ValueError(
-            f"Prompt with ID {prompt_id} does not exist or does not belong to user"
+            f"ID为{prompt_id}的提示词不存在或不属于用户"
         )
 
     return prompt
 
 
 def _get_default_prompt(db_session: Session) -> Prompt:
+    """
+    获取默认提示词
+    
+    参数:
+        db_session: 数据库会话
+    """
     stmt = select(Prompt).where(Prompt.id == 0)
     result = db_session.execute(stmt)
     prompt = result.scalar_one_or_none()
 
     if prompt is None:
-        raise RuntimeError("Default Prompt not found")
+        raise RuntimeError("未找到默认提示词")
 
     return prompt
 
 
 def get_default_prompt(db_session: Session) -> Prompt:
+    """
+    获取默认提示词
+    
+    参数:
+        db_session: 数据库会话
+    """
     return _get_default_prompt(db_session)
 
 
 @lru_cache()
 def get_default_prompt__read_only() -> Prompt:
-    """Due to the way lru_cache / SQLAlchemy works, this can cause issues
-    when trying to attach the returned `Prompt` object to a `Persona`. If you are
-    doing anything other than reading, you should use the `get_default_prompt`
-    method instead."""
+    """
+    由于lru_cache / SQLAlchemy的工作方式,这可能会导致问题
+    当尝试将返回的`Prompt`对象附加到`Persona`时. 如果你
+    除了读取之外的任何操作,你应该使用`get_default_prompt`
+    方法.
+    """
     with Session(get_sqlalchemy_engine()) as db_session:
         return _get_default_prompt(db_session)
 
 
-# TODO: since this gets called with every chat message, could it be more efficient to pregenerate
-# a direct mapping indicating whether a user has access to a specific persona?
 def get_persona_by_id(
     persona_id: int,
-    # if user is `None` assume the user is an admin or auth is disabled
     user: User | None,
     db_session: Session,
     include_deleted: bool = False,
-    is_for_edit: bool = True,  # NOTE: assume true for safety
+    is_for_edit: bool = True,  # 默认假定为true以确保安全
 ) -> Persona:
+    """
+    根据ID获取Persona对象
+    
+    参数:
+        persona_id: Persona的ID
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+        include_deleted: 是否包含已删除的Persona
+        is_for_edit: 是否用于编辑
+    """
     persona_stmt = (
         select(Persona)
         .distinct()
@@ -734,24 +949,24 @@ def get_persona_by_id(
         result = db_session.execute(persona_stmt)
         persona = result.scalar_one_or_none()
         if persona is None:
-            raise ValueError(f"Persona with ID {persona_id} does not exist")
+            raise ValueError(f"ID为{persona_id}的Persona不存在")
         return persona
 
-    # or check if user owns persona
+    # 或检查用户是否拥有Persona
     or_conditions = Persona.user_id == user.id
-    # allow access if persona user id is None
+    # 允许访问如果Persona用户ID为None
     or_conditions |= Persona.user_id == None  # noqa: E711
     if not is_for_edit:
-        # if the user is in a group related to the persona
+        # 如果用户在与Persona相关的组中
         or_conditions |= User__UserGroup.user_id == user.id
-        # if the user is in the .users of the persona
+        # 如果用户在Persona的.users中
         or_conditions |= User.id == user.id
         or_conditions |= Persona.is_public == True  # noqa: E712
     elif user.role == UserRole.GLOBAL_CURATOR:
-        # global curators can edit personas for the groups they are in
+        # 全局策展人可以编辑他们所在组的Persona
         or_conditions |= User__UserGroup.user_id == user.id
     elif user.role == UserRole.CURATOR:
-        # curators can edit personas for the groups they are curators of
+        # 策展人可以编辑他们是策展人的组的Persona
         or_conditions |= (User__UserGroup.user_id == user.id) & (
             User__UserGroup.is_curator == True  # noqa: E712
         )
@@ -761,7 +976,7 @@ def get_persona_by_id(
     persona = result.scalar_one_or_none()
     if persona is None:
         raise ValueError(
-            f"Persona with ID {persona_id} does not exist or does not belong to user"
+            f"ID为{persona_id}的Persona不存在或不属于用户"
         )
     return persona
 
@@ -769,7 +984,13 @@ def get_persona_by_id(
 def get_personas_by_ids(
     persona_ids: list[int], db_session: Session
 ) -> Sequence[Persona]:
-    """Unsafe, can fetch personas from all users"""
+    """
+    根据ID列表获取Persona对象
+    
+    参数:
+        persona_ids: Persona ID列表
+        db_session: 数据库会话
+    """
     if not persona_ids:
         return []
     personas = db_session.scalars(
@@ -782,14 +1003,22 @@ def get_personas_by_ids(
 def get_prompt_by_name(
     prompt_name: str, user: User | None, db_session: Session
 ) -> Prompt | None:
+    """
+    根据名称获取提示词
+    
+    参数:
+        prompt_name: 提示词名称
+        user: 当前用户,用于权限验证
+        db_session: 数据库会话
+    """
     stmt = select(Prompt).where(Prompt.name == prompt_name)
 
-    # if user is not specified OR they are an admin, they should
-    # have access to all prompts, so this where clause is not needed
+    # 如果未指定用户或他们是管理员,他们应该
+    # 访问所有提示词,因此不需要此where子句
     if user and user.role != UserRole.ADMIN:
         stmt = stmt.where(Prompt.user_id == user.id)
 
-    # Order by ID to ensure consistent result when multiple prompts exist
+    # 按ID排序以确保在存在多个提示词时结果一致
     stmt = stmt.order_by(Prompt.id).limit(1)
     result = db_session.execute(stmt).scalar_one_or_none()
     return result
@@ -798,6 +1027,14 @@ def get_prompt_by_name(
 def delete_persona_by_name(
     persona_name: str, db_session: Session, is_default: bool = True
 ) -> None:
+    """
+    根据名称删除Persona
+    
+    参数:
+        persona_name: Persona的名称
+        db_session: 数据库会话
+        is_default: 是否为默认Persona
+    """
     stmt = delete(Persona).where(
         Persona.name == persona_name, Persona.builtin_persona == is_default
     )
@@ -807,12 +1044,26 @@ def delete_persona_by_name(
 
 
 def get_assistant_categories(db_session: Session) -> list[PersonaCategory]:
+    """
+    获取助手类别列表
+    
+    参数:
+        db_session: 数据库会话
+    """
     return db_session.query(PersonaCategory).all()
 
 
 def create_assistant_category(
     db_session: Session, name: str, description: str
 ) -> PersonaCategory:
+    """
+    创建助手类别
+    
+    参数:
+        db_session: 数据库会话
+        name: 类别名称
+        description: 类别描述
+    """
     category = PersonaCategory(name=name, description=description)
     db_session.add(category)
     db_session.commit()
@@ -825,18 +1076,34 @@ def update_persona_category(
     category_name: str,
     db_session: Session,
 ) -> None:
+    """
+    更新助手类别
+    
+    参数:
+        category_id: 类别ID
+        category_description: 类别描述
+        category_name: 类别名称
+        db_session: 数据库会话
+    """
     persona_category = (
         db_session.query(PersonaCategory)
         .filter(PersonaCategory.id == category_id)
         .one_or_none()
     )
     if persona_category is None:
-        raise ValueError(f"Persona category with ID {category_id} does not exist")
+        raise ValueError(f"ID为{category_id}的助手类别不存在")
     persona_category.description = category_description
     persona_category.name = category_name
     db_session.commit()
 
 
 def delete_persona_category(category_id: int, db_session: Session) -> None:
+    """
+    删除助手类别
+    
+    参数:
+        category_id: 类别ID
+        db_session: 数据库会话
+    """
     db_session.query(PersonaCategory).filter(PersonaCategory.id == category_id).delete()
     db_session.commit()

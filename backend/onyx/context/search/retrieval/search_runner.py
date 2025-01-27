@@ -1,3 +1,11 @@
+"""
+这个文件实现了文档搜索的核心功能，包括:
+1. 文档检索的主要逻辑实现
+2. 查询处理和优化
+3. 搜索结果的后处理
+4. NLTK相关文本处理功能
+"""
+
 import string
 from collections.abc import Callable
 
@@ -37,6 +45,11 @@ logger = setup_logger()
 
 
 def download_nltk_data() -> None:
+    """
+    下载和检查NLTK所需的数据资源
+    包括停用词、分词器等必要组件
+    如果资源已存在则跳过下载
+    """
     resources = {
         "stopwords": "corpora/stopwords",
         # "wordnet": "corpora/wordnet",  # Not in use
@@ -57,6 +70,15 @@ def download_nltk_data() -> None:
 
 
 def lemmatize_text(keywords: list[str]) -> list[str]:
+    """
+    对关键词列表进行词形还原处理
+    注：当前未启用此功能
+    
+    Args:
+        keywords: 需要处理的关键词列表
+    Returns:
+        处理后的关键词列表
+    """
     raise NotImplementedError("Lemmatization should not be used currently")
     # try:
     #     query = " ".join(keywords)
@@ -70,8 +92,17 @@ def lemmatize_text(keywords: list[str]) -> list[str]:
 
 
 def remove_stop_words_and_punctuation(keywords: list[str]) -> list[str]:
+    """
+    移除停用词和标点符号
+    
+    Args:
+        keywords: 输入的关键词列表
+    Returns:
+        处理后的关键词列表，如果处理失败则返回原列表
+    """
     try:
         # Re-tokenize using the NLTK tokenizer for better matching
+        # 使用NLTK分词器重新分词以获得更好的匹配效果
         query = " ".join(keywords)
         stop_words = set(stopwords.words("english"))
         word_tokens = word_tokenize(query)
@@ -88,6 +119,14 @@ def remove_stop_words_and_punctuation(keywords: list[str]) -> list[str]:
 def combine_retrieval_results(
     chunk_sets: list[list[InferenceChunk]],
 ) -> list[InferenceChunk]:
+    """
+    合并多个检索结果集
+    
+    Args:
+        chunk_sets: 多个检索结果集的列表
+    Returns:
+        合并并按分数排序后的去重结果列表
+    """
     all_chunks = [chunk for chunk_set in chunk_sets for chunk in chunk_set]
 
     unique_chunks: dict[tuple[str, int], InferenceChunk] = {}
@@ -116,10 +155,20 @@ def doc_index_retrieval(
     db_session: Session,
 ) -> list[InferenceChunk]:
     """
-    This function performs the search to retrieve the chunks,
-    extracts chunks from the large chunks, persists the scores
-    from the large chunks to the referenced chunks,
-    dedupes the chunks, and cleans the chunks.
+    执行文档检索的核心函数
+    
+    功能包括:
+    1. 执行搜索获取文档块
+    2. 从大块文本中提取小块
+    3. 保存分数信息
+    4. 去重和清理处理
+    
+    Args:
+        query: 搜索查询对象
+        document_index: 文档索引接口
+        db_session: 数据库会话
+    Returns:
+        处理后的检索结果列表
     """
     search_settings = get_current_search_settings(db_session)
 
@@ -166,10 +215,12 @@ def doc_index_retrieval(
             normal_chunks.append(chunk)
 
     # If there are no large chunks, just return the normal chunks
+    # 如果没有大文本块，直接返回普通文本块
     if not retrieval_requests:
         return cleanup_chunks(normal_chunks)
 
     # Retrieve and return the referenced normal chunks from the large chunks
+    # 从大文本块中检索并返回引用的普通文本块
     retrieved_inference_chunks = document_index.id_based_retrieval(
         chunk_requests=retrieval_requests,
         filters=query.filters,
@@ -178,6 +229,7 @@ def doc_index_retrieval(
 
     # Apply the scores from the large chunks to the chunks referenced
     # by each large chunk
+    # 将大文本块的分数应用到每个大文本块引用的小文本块上
     for chunk in retrieved_inference_chunks:
         if (chunk.document_id, chunk.chunk_id) in referenced_chunk_scores:
             chunk.score = referenced_chunk_scores[(chunk.document_id, chunk.chunk_id)]
@@ -188,6 +240,7 @@ def doc_index_retrieval(
             )
 
     # Log any chunks that were not found in the retrieved chunks
+    # 记录在检索结果中未找到的文本块
     for reference in referenced_chunk_scores.keys():
         logger.error(f"Chunk {reference} not found in retrieved chunks")
 
@@ -196,21 +249,32 @@ def doc_index_retrieval(
     }
 
     # persist the highest score of each deduped chunk
+    # 保存每个去重文本块的最高分数
     for chunk in retrieved_inference_chunks:
         key = (chunk.document_id, chunk.chunk_id)
         # For duplicates, keep the highest score
+        # 对于重复项，保留最高分数
         if key not in unique_chunks or (chunk.score or 0) > (
             unique_chunks[key].score or 0
         ):
             unique_chunks[key] = chunk
 
     # Deduplicate the chunks
+    # 对文本块进行去重
     deduped_chunks = list(unique_chunks.values())
     deduped_chunks.sort(key=lambda chunk: chunk.score or 0, reverse=True)
     return cleanup_chunks(deduped_chunks)
 
 
 def _simplify_text(text: str) -> str:
+    """
+    简化文本处理：移除标点符号和空白字符，并转换为小写
+    
+    Args:
+        text: 输入文本
+    Returns:
+        处理后的文本
+    """
     return "".join(
         char for char in text if char not in string.punctuation and not char.isspace()
     ).lower()
@@ -223,10 +287,22 @@ def retrieve_chunks(
     retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
     | None = None,
 ) -> list[InferenceChunk]:
-    """Returns a list of the best chunks from an initial keyword/semantic/ hybrid search."""
-
+    """
+    执行文档块检索并返回最佳匹配结果
+    
+    支持多语言查询扩展，提供混合搜索功能
+    
+    Args:
+        query: 搜索查询对象
+        document_index: 文档索引接口
+        db_session: 数据库会话
+        retrieval_metrics_callback: 可选的检索指标回调函数
+    Returns:
+        检索到的最佳匹配文档块列表
+    """
     multilingual_expansion = get_multilingual_expansion(db_session)
     # Don't do query expansion on complex queries, rephrasings likely would not work well
+    # 对于复杂查询不进行查询扩展，因为重新措辞可能效果不好
     if not multilingual_expansion or "\n" in query.query or "\r" in query.query:
         top_chunks = doc_index_retrieval(
             query=query, document_index=document_index, db_session=db_session
@@ -236,14 +312,18 @@ def retrieve_chunks(
         run_queries: list[tuple[Callable, tuple]] = []
 
         # Currently only uses query expansion on multilingual use cases
+        # 目前仅在多语言场景下使用查询扩展
         query_rephrases = multilingual_query_expansion(
             query.query, multilingual_expansion
         )
         # Just to be extra sure, add the original query.
+        # 为了以防万一，添加原始查询
         query_rephrases.append(query.query)
         for rephrase in set(query_rephrases):
             # Sometimes the model rephrases the query in the same language with minor changes
             # Avoid doing an extra search with the minor changes as this biases the results
+            # 有时模型会用相同语言做细微的重述
+            # 避免对这些细微变化进行额外搜索，因为这会导致结果偏差
             simplified_rephrase = _simplify_text(rephrase)
             if simplified_rephrase in simplified_queries:
                 continue
@@ -289,7 +369,17 @@ def inference_sections_from_ids(
     doc_identifiers: list[tuple[str, int]],
     document_index: DocumentIndex,
 ) -> list[InferenceSection]:
+    """
+    根据文档ID列表获取推理章节
+    
+    Args:
+        doc_identifiers: 文档ID和块ID的元组列表
+        document_index: 文档索引接口
+    Returns:
+        推理章节列表
+    """
     # Currently only fetches whole docs
+    # 当前仅获取完整文档
     doc_ids_set = set(doc_id for doc_id, _ in doc_identifiers)
 
     chunk_requests: list[VespaChunkRequest] = [
@@ -297,6 +387,7 @@ def inference_sections_from_ids(
     ]
 
     # No need for ACL here because the doc ids were validated beforehand
+    # 这里不需要ACL因为文档ID已经预先验证过了
     filters = IndexFilters(access_control_list=None)
 
     retrieved_chunks = document_index.id_based_retrieval(
@@ -309,6 +400,7 @@ def inference_sections_from_ids(
         return []
 
     # Group chunks by document ID
+    # 按文档ID对文本块分组
     chunks_by_doc_id: dict[str, list[InferenceChunk]] = {}
     for chunk in cleaned_chunks:
         chunks_by_doc_id.setdefault(chunk.document_id, []).append(chunk)
@@ -322,6 +414,8 @@ def inference_sections_from_ids(
                 # The scores will always be 0 because the fetching by id gives back
                 # no search scores. This is not needed though if the user is explicitly
                 # selecting a document.
+                # 分数将始终为0，因为通过ID获取不会返回搜索分数。
+                # 不过如果用户明确选择了文档，这个分数就不需要了。
                 center_chunk=chunks[0],
                 chunks=chunks,
             )

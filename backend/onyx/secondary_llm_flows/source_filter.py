@@ -1,3 +1,8 @@
+"""
+本文件的主要功能是实现文档源过滤器，用于从用户查询中提取和识别相关的文档来源。
+主要包含了文档源字符串转换、采样和过滤等功能。
+"""
+
 import json
 import random
 
@@ -24,6 +29,15 @@ logger = setup_logger()
 
 
 def strings_to_document_sources(source_strs: list[str]) -> list[DocumentSource]:
+    """
+    将字符串列表转换为DocumentSource对象列表
+    
+    参数:
+        source_strs: 包含文档源字符串的列表
+    
+    返回:
+        转换后的DocumentSource对象列表
+    """
     sources = []
     for s in source_strs:
         try:
@@ -38,6 +52,17 @@ def _sample_document_sources(
     num_sample: int,
     allow_less: bool = True,
 ) -> list[DocumentSource]:
+    """
+    从有效文档源中随机采样
+    
+    参数:
+        valid_sources: 有效的文档源列表
+        num_sample: 需要采样的数量
+        allow_less: 是否允许返回少于请求数量的样本
+        
+    返回:
+        采样后的DocumentSource列表
+    """
     if len(valid_sources) < num_sample:
         if not allow_less:
             raise RuntimeError("Not enough sample Document Sources")
@@ -50,6 +75,16 @@ def _sample_documents_using_custom_connector_classifier(
     query: str,
     valid_sources: list[DocumentSource],
 ) -> list[DocumentSource] | None:
+    """
+    使用自定义连接器分类器对查询进行文档源分类
+    
+    参数:
+        query: 用户查询字符串
+        valid_sources: 有效的文档源列表
+        
+    返回:
+        匹配的DocumentSource列表或None
+    """
     query_joined = "".join(ch for ch in query.lower() if ch.isalnum())
     available_connectors = list(
         filter(
@@ -69,7 +104,19 @@ def _sample_documents_using_custom_connector_classifier(
 def extract_source_filter(
     query: str, llm: LLM, db_session: Session
 ) -> list[DocumentSource] | None:
-    """Returns a list of valid sources for search or None if no specific sources were detected"""
+    """
+    从查询中提取文档源过滤器
+    Returns a list of valid sources for search or None if no specific sources were detected
+    返回用于搜索的有效源列表，如果未检测到特定源则返回None
+    
+    参数:
+        query: 用户查询字符串
+        llm: 语言模型实例
+        db_session: 数据库会话
+        
+    返回:
+        匹配的DocumentSource列表或None
+    """
 
     valid_sources = fetch_unique_document_sources(db_session)
     if not valid_sources:
@@ -84,6 +131,17 @@ def extract_source_filter(
         # Seems the LLM performs similarly without examples
         show_samples: bool = False,
     ) -> list[dict[str, str]]:
+        """
+        生成用于源过滤的消息列表
+        
+        参数:
+            query: 用户查询字符串
+            valid_sources: 有效的文档源列表
+            show_samples: 是否显示样例
+            
+        返回:
+            消息字典列表
+        """
         sample_json = {
             SOURCES_KEY: [
                 s.value
@@ -166,6 +224,15 @@ def extract_source_filter(
     def _extract_source_filters_from_llm_out(
         model_out: str,
     ) -> list[DocumentSource] | None:
+        """
+        从语言模型输出中提取文档源过滤器
+        
+        参数:
+            model_out: 模型输出字符串
+            
+        返回:
+            DocumentSource列表或None
+        """
         try:
             sources_dict = extract_embedded_json(model_out)
             sources_list = sources_dict.get(SOURCES_KEY)
@@ -186,6 +253,9 @@ def extract_source_filter(
 
 
 if __name__ == "__main__":
+    """
+    主程序入口：用于测试文档源提取功能
+    """
     from onyx.llm.factory import get_default_llms, get_main_llm_from_tuple
 
     # Just for testing purposes

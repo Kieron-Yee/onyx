@@ -1,3 +1,13 @@
+"""
+此文件实现了一个通用的大语言模型(LLM)接口封装,主要功能包括:
+1. 提供统一的LLM调用接口,支持多种LLM服务提供商
+2. 处理消息转换、流式响应等功能
+3. 实现错误处理和日志记录
+4. 支持工具调用(Tool Calls)功能
+
+主要基于litellm库实现,可以方便地配置和使用各种LLM服务。
+"""
+
 import json
 import os
 import traceback
@@ -50,6 +60,15 @@ _LLM_PROMPT_LONG_TERM_LOG_CATEGORY = "llm_prompt"
 
 
 def _base_msg_to_role(msg: BaseMessage) -> str:
+    """
+    将BaseMessage对象转换为对应的角色字符串
+    
+    参数:
+        msg: BaseMessage - 需要转换的消息对象
+    
+    返回:
+        str - 对应的角色字符串(user/assistant/system/function/unknown)
+    """
     if isinstance(msg, HumanMessage) or isinstance(msg, HumanMessageChunk):
         return "user"
     if isinstance(msg, AIMessage) or isinstance(msg, AIMessageChunk):
@@ -64,6 +83,18 @@ def _base_msg_to_role(msg: BaseMessage) -> str:
 def _convert_litellm_message_to_langchain_message(
     litellm_message: litellm.Message,
 ) -> BaseMessage:
+    """
+    将litellm的消息格式转换为langchain的消息格式
+    
+    参数:
+        litellm_message: 来自litellm的消息对象
+        
+    返回:
+        BaseMessage: 转换后的langchain消息对象
+        
+    抛出:
+        ValueError: 当收到未知的角色类型时
+    """
     # Extracting the basic attributes from the litellm message
     content = litellm_message.content or ""
     role = litellm_message.role
@@ -102,7 +133,21 @@ def _convert_litellm_message_to_langchain_message(
 
 
 def _convert_message_to_dict(message: BaseMessage) -> dict:
-    """Adapted from langchain_community.chat_models.litellm._convert_message_to_dict"""
+    """
+    将langchain的消息对象转换为字典格式
+    
+    # Adapted from langchain_community.chat_models.litellm._convert_message_to_dict
+    # 改编自langchain_community.chat_models.litellm._convert_message_to_dict
+    
+    参数:
+        message: BaseMessage - 需要转换的langchain消息对象
+    
+    返回:
+        dict - 转换后的消息字典
+        
+    抛出:
+        ValueError: 当收到未知的消息类型时
+    """
     if isinstance(message, ChatMessage):
         message_dict = {"role": message.role, "content": message.content}
     elif isinstance(message, HumanMessage):
@@ -151,7 +196,23 @@ def _convert_delta_to_message_chunk(
     curr_msg: BaseMessage | None,
     stop_reason: str | None = None,
 ) -> BaseMessageChunk:
-    """Adapted from langchain_community.chat_models.litellm._convert_delta_to_message_chunk"""
+    """
+    将增量消息转换为消息块
+    
+    # Adapted from langchain_community.chat_models.litellm._convert_delta_to_message_chunk
+    # 改编自langchain_community.chat_models.litellm._convert_delta_to_message_chunk
+    
+    参数:
+        _dict: dict - 增量消息字典
+        curr_msg: BaseMessage | None - 当前消息对象
+        stop_reason: str | None - 停止原因
+    
+    返回:
+        BaseMessageChunk - 转换后的消息块
+        
+    抛出:
+        ValueError: 当收到未知的角色类型时
+    """
     role = _dict.get("role") or (_base_msg_to_role(curr_msg) if curr_msg else None)
     content = _dict.get("content") or ""
     additional_kwargs = {}
@@ -207,7 +268,17 @@ def _convert_delta_to_message_chunk(
 def _prompt_to_dict(
     prompt: LanguageModelInput,
 ) -> Sequence[str | list[str] | dict[str, Any] | tuple[str, str]]:
+    """
+    将提示输入转换为字典序列
+    
+    参数:
+        prompt: LanguageModelInput - 输入提示
+        
+    返回:
+        Sequence - 转换后的字典序列
+    """
     # NOTE: this must go first, since it is also a Sequence
+    # 注意：这必须放在首位，因为它也是一个Sequence
     if isinstance(prompt, str):
         return [_convert_message_to_dict(HumanMessage(content=prompt))]
 
@@ -222,8 +293,16 @@ def _prompt_to_dict(
 
 
 class DefaultMultiLLM(LLM):
-    """Uses Litellm library to allow easy configuration to use a multitude of LLMs
-    See https://python.langchain.com/docs/integrations/chat/litellm"""
+    """
+    基于Litellm库实现的通用LLM接口类
+    
+    支持多种LLM提供商的统一接口实现,包括:
+    - 消息处理和转换
+    - 流式响应
+    - 错误处理
+    - 日志记录
+    - 工具调用
+    """
 
     def __init__(
         self,
@@ -243,6 +322,26 @@ class DefaultMultiLLM(LLM):
         model_kwargs: dict[str, Any] | None = None,
         long_term_logger: LongTermLogger | None = None,
     ):
+        """
+        初始化LLM接口
+        
+        参数:
+            api_key: API密钥
+            timeout: 超时时间(秒)
+            model_provider: 模型提供商
+            model_name: 模型名称
+            api_base: API基础URL
+            api_version: API版本
+            deployment_name: 部署名称
+            max_output_tokens: 最大输出token数
+            custom_llm_provider: 自定义LLM提供商
+            temperature: 采样温度
+            custom_config: 自定义配置
+            extra_headers: 额外的HTTP头
+            extra_body: 额外的请求体参数
+            model_kwargs: 模型特定的参数
+            long_term_logger: 长期日志记录器
+        """
         self._timeout = timeout
         self._model_provider = model_provider
         self._model_version = model_name
@@ -267,6 +366,7 @@ class DefaultMultiLLM(LLM):
         self._custom_config = custom_config
 
         # Create a dictionary for model-specific arguments if it's None
+        # 如果model_kwargs为None，则创建一个用于模型特定参数的字典
         model_kwargs = model_kwargs or {}
 
         # NOTE: have to set these as environment variables for Litellm since
@@ -274,16 +374,22 @@ class DefaultMultiLLM(LLM):
         # variables. We'll also try passing them in, since litellm just ignores
         # addtional kwargs (and some kwargs MUST be passed in rather than set as
         # env variables)
+        # 注意：必须将这些设置为Litellm的环境变量，因为不是所有参数都能直接传入，
+        # 但它们都支持通过环境变量设置。我们也会尝试直接传入这些参数，因为litellm会忽略
+        # 额外的kwargs（有些kwargs必须传入而不是设置为环境变量）
         if custom_config:
             # Specifically pass in "vertex_credentials" as a model_kwarg to the
             # completion call for vertex AI. More details here:
             # https://docs.litellm.ai/docs/providers/vertex
+            # 专门将"vertex_credentials"作为model_kwarg传递给vertex AI的completion调用。
+            # 更多详情请参见：https://docs.litellm.ai/docs/providers/vertex
             vertex_credentials_key = "vertex_credentials"
             vertex_credentials = custom_config.get(vertex_credentials_key)
             if vertex_credentials and model_provider == "vertex_ai":
                 model_kwargs[vertex_credentials_key] = vertex_credentials
             else:
                 # standard case
+                # 标准情况
                 for k, v in custom_config.items():
                     os.environ[k] = v
 
@@ -295,9 +401,18 @@ class DefaultMultiLLM(LLM):
         self._model_kwargs = model_kwargs
 
     def log_model_configs(self) -> None:
+        """
+        记录模型配置到日志
+        """
         logger.debug(f"Config: {self.config}")
 
     def _safe_model_config(self) -> dict:
+        """
+        返回安全的模型配置(隐藏敏感信息)
+        
+        返回:
+            dict - 处理后的配置字典
+        """
         dump = self.config.model_dump()
         dump["api_key"] = mask_string(dump.get("api_key", ""))
         return dump
@@ -375,33 +490,57 @@ class DefaultMultiLLM(LLM):
         stream: bool,
         structured_response_format: dict | None = None,
     ) -> litellm.ModelResponse | litellm.CustomStreamWrapper:
+        """
+        执行LLM完成请求
+        
+        参数:
+            prompt: 输入提示
+            tools: 可用工具列表
+            tool_choice: 工具选择选项
+            stream: 是否使用流式响应
+            structured_response_format: 结构化响应格式
+            
+        返回:
+            litellm.ModelResponse | litellm.CustomStreamWrapper: 模型响应
+            
+        抛出:
+            Exception: 当调用失败时记录并重新抛出异常
+        """
         # litellm doesn't accept LangChain BaseMessage objects, so we need to convert them
         # to a dict representation
+        # litellm不接受LangChain BaseMessage对象，所以需要将其转换为字典表示
         processed_prompt = _prompt_to_dict(prompt)
         self._record_call(processed_prompt)
 
         try:
             return litellm.completion(
                 # model choice
+                # 模型选择
                 model=f"{self.config.model_provider}/{self.config.deployment_name or self.config.model_name}",
                 # NOTE: have to pass in None instead of empty string for these
                 # otherwise litellm can have some issues with bedrock
+                # 注意：这些参数必须传入None而不是空字符串，否则litellm在bedrock上可能会有问题
                 api_key=self._api_key or None,
                 base_url=self._api_base or None,
                 api_version=self._api_version or None,
                 custom_llm_provider=self._custom_llm_provider or None,
                 # actual input
+                # 实际输入
                 messages=processed_prompt,
                 tools=tools,
                 tool_choice=tool_choice if tools else None,
                 # streaming choice
+                # 流式选择
                 stream=stream,
                 # model params
+                # 模型参数
                 temperature=self._temperature,
                 timeout=self._timeout,
                 # For now, we don't support parallel tool calls
                 # NOTE: we can't pass this in if tools are not specified
                 # or else OpenAI throws an error
+                # 当前不支持并行工具调用
+                # 注意：如果没有指定tools，就不能传入这个参数，否则OpenAI会抛出错误
                 **({"parallel_tool_calls": False} if tools else {}),
                 **(
                     {"response_format": structured_response_format}
@@ -413,10 +552,17 @@ class DefaultMultiLLM(LLM):
         except Exception as e:
             self._record_error(processed_prompt, e)
             # for break pointing
+            # 用于断点调试
             raise e
 
     @property
     def config(self) -> LLMConfig:
+        """
+        获取当前LLM配置
+        
+        返回:
+            LLMConfig: 当前配置信息
+        """
         return LLMConfig(
             model_provider=self._model_provider,
             model_name=self._model_version,
@@ -434,6 +580,21 @@ class DefaultMultiLLM(LLM):
         tool_choice: ToolChoiceOptions | None = None,
         structured_response_format: dict | None = None,
     ) -> BaseMessage:
+        """
+        实现LLM的直接调用
+        
+        参数:
+            prompt: 输入提示
+            tools: 可用工具列表
+            tool_choice: 工具选择选项
+            structured_response_format: 结构化响应格式
+            
+        返回:
+            BaseMessage: 模型响应消息
+            
+        抛出:
+            ValueError: 当响应格式不符合预期时
+        """
         if LOG_DANSWER_MODEL_INTERACTIONS:
             self.log_model_configs()
 
@@ -459,6 +620,21 @@ class DefaultMultiLLM(LLM):
         tool_choice: ToolChoiceOptions | None = None,
         structured_response_format: dict | None = None,
     ) -> Iterator[BaseMessage]:
+        """
+        实现LLM的流式调用
+        
+        参数:
+            prompt: 输入提示
+            tools: 可用工具列表
+            tool_choice: 工具选择选项
+            structured_response_format: 结构化响应格式
+            
+        返回:
+            Iterator[BaseMessage]: 消息流迭代器
+            
+        抛出:
+            RuntimeError: 当AI模型在生成过程中失败时
+        """
         if LOG_DANSWER_MODEL_INTERACTIONS:
             self.log_model_configs()
 

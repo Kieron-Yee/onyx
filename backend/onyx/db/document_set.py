@@ -1,3 +1,9 @@
+"""
+这个文件主要用于处理文档集(Document Set)相关的数据库操作。
+包括文档集的创建、更新、删除、查询等功能，以及文档集与连接器凭证对(Connector Credential Pair)、
+用户组等之间关系的管理。
+"""
+
 from collections.abc import Sequence
 from typing import cast
 from uuid import UUID
@@ -36,14 +42,26 @@ logger = setup_logger()
 def _add_user_filters(
     stmt: Select, user: User | None, get_editable: bool = True
 ) -> Select:
+    """
+    为查询添加用户过滤条件，控制用户对文档集的访问权限
+    
+    Args:
+        stmt: 原始查询语句
+        user: 用户对象
+        get_editable: 是否只获取可编辑的文档集
+    
+    Returns:
+        添加了用户过滤条件的查询语句
+    """
     # If user is None, assume the user is an admin or auth is disabled
+    # 如果用户为空，则假定用户是管理员或认证被禁用
     if user is None or user.role == UserRole.ADMIN:
         return stmt
 
     DocumentSet__UG = aliased(DocumentSet__UserGroup)
     User__UG = aliased(User__UserGroup)
     """
-    Here we select cc_pairs by relation:
+    通过以下关系选择cc_pairs:
     User -> User__UserGroup -> DocumentSet__UserGroup -> DocumentSet
     """
     stmt = stmt.outerjoin(DocumentSet__UG).outerjoin(
@@ -51,14 +69,11 @@ def _add_user_filters(
         User__UserGroup.user_group_id == DocumentSet__UG.user_group_id,
     )
     """
-    Filter DocumentSets by:
-    - if the user is in the user_group that owns the DocumentSet
-    - if the user is not a global_curator, they must also have a curator relationship
-    to the user_group
-    - if editing is being done, we also filter out DocumentSets that are owned by groups
-    that the user isn't a curator for
-    - if we are not editing, we show all DocumentSets in the groups the user is a curator
-    for (as well as public DocumentSets)
+    按以下条件过滤DocumentSets:
+    - 如果用户在拥有DocumentSet的user_group中
+    - 如果用户不是global_curator，他们还必须与user_group有curator关系
+    - 如果在进行编辑，我们还会过滤掉用户不是curator的组所拥有的DocumentSets
+    - 如果不是在编辑，我们显示用户是curator的组中的所有DocumentSets（以及公共DocumentSets）
     """
     where_clause = User__UserGroup.user_id == user.id
     if user.role == UserRole.CURATOR and get_editable:
@@ -82,7 +97,11 @@ def _add_user_filters(
 def _delete_document_set_cc_pairs__no_commit(
     db_session: Session, document_set_id: int, is_current: bool | None = None
 ) -> None:
-    """NOTE: does not commit transaction, this must be done by the caller"""
+    """
+    删除文档集与连接器凭证对之间的关联关系
+    
+    注意：不提交事务，需要调用者自行提交
+    """
     stmt = delete(DocumentSet__ConnectorCredentialPair).where(
         DocumentSet__ConnectorCredentialPair.document_set_id == document_set_id
     )
@@ -94,7 +113,11 @@ def _delete_document_set_cc_pairs__no_commit(
 def _mark_document_set_cc_pairs_as_outdated__no_commit(
     db_session: Session, document_set_id: int
 ) -> None:
-    """NOTE: does not commit transaction, this must be done by the caller"""
+    """
+    将文档集的所有连接器凭证对标记为过期
+    
+    注意：不提交事务，需要调用者自行提交
+    """
     stmt = select(DocumentSet__ConnectorCredentialPair).where(
         DocumentSet__ConnectorCredentialPair.document_set_id == document_set_id
     )
@@ -105,7 +128,11 @@ def _mark_document_set_cc_pairs_as_outdated__no_commit(
 def delete_document_set_privacy__no_commit(
     document_set_id: int, db_session: Session
 ) -> None:
-    """No private document sets in Onyx MIT"""
+    """
+    删除文档集的隐私设置
+    
+    在MIT版本中不支持私有文档集
+    """
 
 
 def get_document_set_by_id(
@@ -114,6 +141,18 @@ def get_document_set_by_id(
     user: User | None = None,
     get_editable: bool = True,
 ) -> DocumentSetDBModel | None:
+    """
+    根据ID获取文档集
+    
+    Args:
+        db_session: 数据库会话
+        document_set_id: 文档集ID
+        user: 用户对象，用于权限检查
+        get_editable: 是否只获取可编辑的文档集
+    
+    Returns:
+        文档集对象，如果不存在则返回None
+    """
     stmt = select(DocumentSetDBModel).distinct()
     stmt = stmt.where(DocumentSetDBModel.id == document_set_id)
     stmt = _add_user_filters(stmt=stmt, user=user, get_editable=get_editable)
@@ -123,6 +162,16 @@ def get_document_set_by_id(
 def get_document_set_by_name(
     db_session: Session, document_set_name: str
 ) -> DocumentSetDBModel | None:
+    """
+    根据名称获取文档集
+    
+    Args:
+        db_session: 数据库会话
+        document_set_name: 文档集名称
+    
+    Returns:
+        文档集对象，如果不存在则返回None
+    """
     return db_session.scalar(
         select(DocumentSetDBModel).where(DocumentSetDBModel.name == document_set_name)
     )
@@ -131,6 +180,16 @@ def get_document_set_by_name(
 def get_document_sets_by_ids(
     db_session: Session, document_set_ids: list[int]
 ) -> Sequence[DocumentSetDBModel]:
+    """
+    根据ID列表获取多个文档集
+    
+    Args:
+        db_session: 数据库会话
+        document_set_ids: 文档集ID列表
+    
+    Returns:
+        文档集对象序列
+    """
     if not document_set_ids:
         return []
     return db_session.scalars(
@@ -144,6 +203,18 @@ def make_doc_set_private(
     group_ids: list[int] | None,
     db_session: Session,
 ) -> None:
+    """
+    将文档集设为私有（在MIT版本中不支持此功能）
+    
+    Args:
+        document_set_id: 文档集ID
+        user_ids: 用户ID列表
+        group_ids: 用户组ID列表
+        db_session: 数据库会话
+    
+    Raises:
+        NotImplementedError: MIT版本不支持私有文档集
+    """
     # May cause error if someone switches down to MIT from EE
     if user_ids or group_ids:
         raise NotImplementedError("Onyx MIT does not support private Document Sets")
@@ -155,8 +226,8 @@ def _check_if_cc_pairs_are_owned_by_groups(
     group_ids: list[int],
 ) -> None:
     """
-    This function checks if the CC pairs are owned by the specified groups or public.
-    If not, it raises a ValueError.
+    检查连接器凭证对是否由指定的用户组拥有或为公共的。
+    如果不是，则抛出ValueError异常。
     """
     group_cc_pair_relationships = get_cc_pair_groups_for_ids(
         db_session=db_session,
@@ -193,8 +264,22 @@ def insert_document_set(
     user_id: UUID | None,
     db_session: Session,
 ) -> tuple[DocumentSetDBModel, list[DocumentSet__ConnectorCredentialPair]]:
+    """
+    创建新的文档集
+    
+    Args:
+        document_set_creation_request: 文档集创建请求对象
+        user_id: 创建文档集的用户ID
+        db_session: 数据库会话
+    
+    Returns:
+        包含新创建的文档集和其关联的连接器凭证对关系列表的元组
+        
+    Raises:
+        ValueError: 当没有提供连接器或其他验证失败时
+    """
+    # 实际上是cc-pairs，但UI显示这个错误
     if not document_set_creation_request.cc_pair_ids:
-        # It's cc-pairs in actuality but the UI displays this error
         raise ValueError("Cannot create a document set with no Connectors")
 
     if not document_set_creation_request.is_public:
@@ -249,9 +334,9 @@ def update_document_set(
     document_set_update_request: DocumentSetUpdateRequest,
     user: User | None = None,
 ) -> tuple[DocumentSetDBModel, list[DocumentSet__ConnectorCredentialPair]]:
-    """If successful, this sets document_set_row.is_up_to_date = False.
-    That will be processed via Celery in check_for_vespa_sync_task
-    and trigger a long running background sync to Vespa.
+    """
+    更新文档集信息。如果成功，将设置document_set_row.is_up_to_date = False。
+    这将通过Celery在check_for_vespa_sync_task中处理，并触发长时间运行的后台同步到Vespa。
     """
     if not document_set_update_request.cc_pair_ids:
         # It's cc-pairs in actuality but the UI displays this error
@@ -322,9 +407,19 @@ def update_document_set(
 
 
 def mark_document_set_as_synced(document_set_id: int, db_session: Session) -> None:
+    """
+    将文档集标记为已同步状态
+    
+    Args:
+        document_set_id: 文档集ID
+        db_session: 数据库会话
+    
+    Raises:
+        ValueError: 如果指定ID的文档集不存在
+    """
     stmt = select(DocumentSetDBModel).where(DocumentSetDBModel.id == document_set_id)
     document_set = db_session.scalar(stmt)
-    if document_set is None:
+    if (document_set is None):
         raise ValueError(f"No document set with ID: {document_set_id}")
 
     # mark as up to date
@@ -339,6 +434,13 @@ def mark_document_set_as_synced(document_set_id: int, db_session: Session) -> No
 def delete_document_set(
     document_set_row: DocumentSetDBModel, db_session: Session
 ) -> None:
+    """
+    删除文档集及其所有相关联系
+    
+    Args:
+        document_set_row: 要删除的文档集对象
+        db_session: 数据库会话
+    """
     # delete all relationships to CC pairs
     _delete_document_set_cc_pairs__no_commit(
         db_session=db_session, document_set_id=document_set_row.id
@@ -352,10 +454,10 @@ def mark_document_set_as_to_be_deleted(
     document_set_id: int,
     user: User | None = None,
 ) -> None:
-    """Cleans up all document_set -> cc_pair relationships and marks the document set
-    as needing an update. The actual document set row will be deleted by the background
-    job which syncs these changes to Vespa."""
-
+    """
+    清除所有文档集与连接器凭证对的关系，并将文档集标记为需要更新。
+    实际的文档集行将由同步到Vespa的后台作业删除。
+    """
     try:
         document_set_row = get_document_set_by_id(
             db_session=db_session,
@@ -399,8 +501,17 @@ def mark_document_set_as_to_be_deleted(
 def delete_document_set_cc_pair_relationship__no_commit(
     connector_id: int, credential_id: int, db_session: Session
 ) -> int:
-    """Deletes all rows from DocumentSet__ConnectorCredentialPair where the
-    connector_credential_pair_id matches the given cc_pair_id."""
+    """
+    删除DocumentSet__ConnectorCredentialPair中所有与给定cc_pair_id匹配的行。
+    
+    Args:
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        db_session: 数据库会话
+    
+    Returns:
+        删除的行数
+    """
     delete_stmt = delete(DocumentSet__ConnectorCredentialPair).where(
         and_(
             ConnectorCredentialPair.connector_id == connector_id,
@@ -416,22 +527,30 @@ def delete_document_set_cc_pair_relationship__no_commit(
 def fetch_document_sets(
     user_id: UUID | None, db_session: Session, include_outdated: bool = False
 ) -> list[tuple[DocumentSetDBModel, list[ConnectorCredentialPair]]]:
-    """Return is a list where each element contains a tuple of:
-    1. The document set itself
-    2. All CC pairs associated with the document set"""
+    """
+    获取文档集及其关联的连接器凭证对。
+    
+    Args:
+        user_id: 用户ID
+        db_session: 数据库会话
+        include_outdated: 是否包含过期的连接器凭证对
+    
+    Returns:
+        包含文档集及其关联的连接器凭证对的列表
+    """
     stmt = (
         select(DocumentSetDBModel, ConnectorCredentialPair)
         .join(
             DocumentSet__ConnectorCredentialPair,
             DocumentSetDBModel.id
             == DocumentSet__ConnectorCredentialPair.document_set_id,
-            isouter=True,  # outer join is needed to also fetch document sets with no cc pairs
+            isouter=True,  # 需要外部连接以同时获取没有cc pairs的文档集
         )
         .join(
             ConnectorCredentialPair,
             ConnectorCredentialPair.id
             == DocumentSet__ConnectorCredentialPair.connector_credential_pair_id,
-            isouter=True,  # outer join is needed to also fetch document sets with no cc pairs
+            isouter=True,  # 需要外部连接以同时获取没有cc pairs的文档集
         )
     )
     if not include_outdated:
@@ -472,6 +591,17 @@ def fetch_all_document_sets_for_user(
     user: User | None = None,
     get_editable: bool = True,
 ) -> Sequence[DocumentSetDBModel]:
+    """
+    获取用户可访问的所有文档集
+    
+    Args:
+        db_session: 数据库会话
+        user: 用户对象
+        get_editable: 是否只获取可编辑的文档集
+    
+    Returns:
+        文档集对象序列
+    """
     stmt = select(DocumentSetDBModel).distinct()
     stmt = _add_user_filters(stmt, user, get_editable=get_editable)
     return db_session.scalars(stmt).all()
@@ -484,6 +614,19 @@ def fetch_documents_for_document_set_paginated(
     last_document_id: str | None = None,
     limit: int = 100,
 ) -> tuple[Sequence[Document], str | None]:
+    """
+    分页获取文档集中的文档
+    
+    Args:
+        document_set_id: 文档集ID
+        db_session: 数据库会话
+        current_only: 是否只获取当前的文档
+        last_document_id: 上一个文档的ID
+        limit: 每页的文档数量
+    
+    Returns:
+        包含文档列表和最后一个文档ID的元组
+    """
     stmt = (
         select(Document)
         .join(
@@ -529,10 +672,19 @@ def construct_document_select_by_docset(
     document_set_id: int,
     current_only: bool = True,
 ) -> Select:
-    """This returns a statement that should be executed using
-    .yield_per() to minimize overhead. The primary consumers of this function
-    are background processing task generators."""
-
+    """
+    构建一个查询语句，用于根据文档集ID获取文档。
+    
+    这个查询语句应该使用.yield_per()执行，以最小化开销。
+    这个函数的主要消费者是后台处理任务生成器。
+    
+    Args:
+        document_set_id: 文档集ID
+        current_only: 是否只获取当前的文档
+    
+    Returns:
+        查询语句
+    """
     stmt = (
         select(Document)
         .join(
@@ -576,11 +728,14 @@ def fetch_document_sets_for_document(
     db_session: Session,
 ) -> list[str]:
     """
-    Fetches the document set names for a single document ID.
-
-    :param document_id: The ID of the document to fetch sets for.
-    :param db_session: The SQLAlchemy session to use for the query.
-    :return: A list of document set names, or None if no result is found.
+    获取单个文档ID的文档集名称。
+    
+    Args:
+        document_id: 文档ID
+        db_session: 数据库会话
+    
+    Returns:
+        文档集名称列表
     """
     result = fetch_document_sets_for_documents([document_id], db_session)
     if not result:
@@ -593,16 +748,23 @@ def fetch_document_sets_for_documents(
     document_ids: list[str],
     db_session: Session,
 ) -> Sequence[tuple[str, list[str]]]:
-    """Gives back a list of (document_id, list[document_set_names]) tuples"""
+    """
+    获取多个文档ID的文档集名称。
+    
+    Args:
+        document_ids: 文档ID列表
+        db_session: 数据库会话
+    
+    Returns:
+        包含文档ID和文档集名称列表的元组序列
+    """
+    """构建子查询"""
+    # 注意：必须首先构建这些子查询，以确保我们为每个指定的document_id获得一行返回。
+    # 基本上，我们要先做过滤，然后再做外部连接。
 
-    """Building subqueries"""
-    # NOTE: have to build these subqueries first in order to guarantee that we get one
-    # returned row for each specified document_id. Basically, we want to do the filters first,
-    # then the outer joins.
-
-    # don't include CC pairs that are being deleted
-    # NOTE: CC pairs can never go from DELETING to any other state -> it's safe to ignore them
-    # as we can assume their document sets are no longer relevant
+    # 不包括正在删除的CC pairs
+    # 注意：CC pairs永远不会从DELETING状态转换到任何其他状态 -> 可以安全地忽略它们，
+    # 因为我们可以假设它们的文档集不再相关
     valid_cc_pairs_subquery = aliased(
         ConnectorCredentialPair,
         select(ConnectorCredentialPair)
@@ -618,7 +780,7 @@ def fetch_document_sets_for_documents(
         .where(DocumentSet__ConnectorCredentialPair.is_current == True)  # noqa: E712
         .subquery(),
     )
-    """End building subqueries"""
+    """结束构建子查询"""
 
     stmt = (
         select(
@@ -627,7 +789,7 @@ def fetch_document_sets_for_documents(
                 func.array_remove(func.array_agg(DocumentSetDBModel.name), None), []
             ).label("document_set_names"),
         )
-        # Here we select document sets by relation:
+        # 通过以下关系选择文档集：
         # Document -> DocumentByConnectorCredentialPair -> ConnectorCredentialPair ->
         # DocumentSet__ConnectorCredentialPair -> DocumentSet
         .outerjoin(
@@ -665,8 +827,19 @@ def get_or_create_document_set_by_name(
     document_set_description: str = "Default Persona created Document-Set, "
     "please update description",
 ) -> DocumentSetDBModel:
-    """This is used by the default personas which need to attach to document sets
-    on server startup"""
+    """
+    获取或创建文档集。
+    
+    这个函数用于默认的角色(personas)，它们需要在服务器启动时附加到文档集。
+    
+    Args:
+        db_session: 数据库会话
+        document_set_name: 文档集名称
+        document_set_description: 文档集描述
+    
+    Returns:
+        文档集对象
+    """
     doc_set = get_document_set_by_name(db_session, document_set_name)
     if doc_set is not None:
         return doc_set
@@ -688,8 +861,16 @@ def check_document_sets_are_public(
     db_session: Session,
     document_set_ids: list[int],
 ) -> bool:
-    """Checks if any of the CC-Pairs are Non Public (meaning that some documents in this document
-    set is not Public"""
+    """
+    检查文档集中的所有连接器凭证对是否为公共的。
+    
+    Args:
+        db_session: 数据库会话
+        document_set_ids: 文档集ID列表
+    
+    Returns:
+        如果所有连接器凭证对都是公共的，则返回True，否则返回False
+    """
     connector_credential_pair_ids = (
         db_session.query(
             DocumentSet__ConnectorCredentialPair.connector_credential_pair_id

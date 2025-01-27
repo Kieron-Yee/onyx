@@ -1,3 +1,14 @@
+"""
+This module manages the built-in tools system for the application.
+本模块管理应用程序的内置工具系统。
+
+主要功能：
+1. 定义和管理内置工具的配置
+2. 处理工具的加载、更新和删除
+3. 提供工具缓存和检索功能
+4. 自动化工具分配给Persona
+"""
+
 import os
 from typing import Type
 from typing_extensions import TypedDict  # noreorder
@@ -23,6 +34,16 @@ logger = setup_logger()
 
 
 class InCodeToolInfo(TypedDict):
+    """
+    Represents the configuration structure for built-in tools
+    表示内置工具的配置结构
+    
+    属性说明：
+    cls: 工具类
+    description: 工具描述
+    in_code_tool_id: 工具在代码中的唯一标识
+    display_name: 工具显示名称
+    """
     cls: Type[Tool]
     description: str
     in_code_tool_id: str
@@ -65,6 +86,18 @@ BUILT_IN_TOOLS: list[InCodeToolInfo] = [
 
 
 def load_builtin_tools(db_session: Session) -> None:
+    """
+    Load and synchronize built-in tools with the database
+    加载并同步内置工具到数据库
+    
+    参数:
+        db_session: 数据库会话对象
+    
+    功能：
+    - 更新现有工具的信息
+    - 添加新的内置工具
+    - 删除不再使用的工具
+    """
     existing_in_code_tools = db_session.scalars(
         select(ToolDBModel).where(not_(ToolDBModel.in_code_tool_id.is_(None)))
     ).all()
@@ -107,8 +140,16 @@ def load_builtin_tools(db_session: Session) -> None:
 def auto_add_search_tool_to_personas(db_session: Session) -> None:
     """
     Automatically adds the SearchTool to all Persona objects in the database that have
-    `num_chunks` either unset or set to a value that isn't 0. This is done to migrate
-    Persona objects that were created before the concept of Tools were added.
+    `num_chunks` either unset or set to a value that isn't 0.
+    自动将搜索工具添加到数据库中所有num_chunks未设置或不为0的Persona对象中。
+    
+    参数:
+        db_session: 数据库会话对象
+    
+    功能：
+    - 查找数据库中的SearchTool
+    - 将SearchTool添加到符合条件的Persona对象中
+    - 同步更新到数据库
     """
     # Fetch the SearchTool from the database based on in_code_tool_id from BUILT_IN_TOOLS
     search_tool_id = next(
@@ -155,6 +196,17 @@ _built_in_tools_cache: dict[int, Type[Tool]] | None = None
 
 
 def refresh_built_in_tools_cache(db_session: Session) -> None:
+    """
+    刷新内置工具的缓存
+    
+    参数:
+        db_session: 数据库会话对象
+    
+    功能：
+    - 清空现有缓存
+    - 从数据库重新加载所有内置工具
+    - 更新工具缓存字典
+    """
     global _built_in_tools_cache
     _built_in_tools_cache = {}
     all_tool_built_in_tools = (
@@ -180,6 +232,21 @@ def refresh_built_in_tools_cache(db_session: Session) -> None:
 def get_built_in_tool_by_id(
     tool_id: int, db_session: Session, force_refresh: bool = False
 ) -> Type[Tool]:
+    """
+    根据ID获取内置工具类
+    
+    参数:
+        tool_id: 工具ID
+        db_session: 数据库会话对象
+        force_refresh: 是否强制刷新缓存
+    
+    返回:
+        Tool类型的工具类
+    
+    异常:
+        ValueError: 当工具ID在缓存中不存在时
+        RuntimeError: 当工具缓存刷新失败时
+    """
     global _built_in_tools_cache
     if _built_in_tools_cache is None or force_refresh:
         refresh_built_in_tools_cache(db_session)

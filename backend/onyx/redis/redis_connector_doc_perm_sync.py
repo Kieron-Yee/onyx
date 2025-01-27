@@ -1,3 +1,11 @@
+"""
+这个文件实现了文档权限同步任务与Redis之间的交互管理。
+主要功能：
+1. 管理文档权限同步的任务状态
+2. 处理任务生成和进度跟踪
+3. 提供任务集合的管理功能
+"""
+
 import time
 from datetime import datetime
 from typing import cast
@@ -16,13 +24,22 @@ from onyx.configs.constants import OnyxCeleryTask
 
 
 class RedisConnectorPermissionSyncPayload(BaseModel):
+    """
+    权限同步任务的负载数据模型
+    
+    属性：
+        started: 任务开始时间
+        celery_task_id: Celery任务ID
+    """
     started: datetime | None
     celery_task_id: str | None
 
 
 class RedisConnectorPermissionSync:
     """Manages interactions with redis for doc permission sync tasks. Should only be accessed
-    through RedisConnector."""
+    through RedisConnector.
+    通过RedisConnector管理文档权限同步任务与Redis之间的交互。
+    """
 
     PREFIX = "connectordocpermissionsync"
 
@@ -41,6 +58,14 @@ class RedisConnectorPermissionSync:
     SUBTASK_PREFIX = f"{PREFIX}+sub"  # connectorpermissions+sub
 
     def __init__(self, tenant_id: str | None, id: int, redis: redis.Redis) -> None:
+        """
+        初始化Redis连接器权限同步实例
+        
+        参数：
+            tenant_id: 租户ID
+            id: 连接器ID
+            redis: Redis客户端实例
+        """
         self.tenant_id: str | None = tenant_id
         self.id = id
         self.redis = redis
@@ -55,18 +80,35 @@ class RedisConnectorPermissionSync:
         self.subtask_prefix: str = f"{self.SUBTASK_PREFIX}_{id}"
 
     def taskset_clear(self) -> None:
+        """
+        清除任务集合中的所有任务
+        """
         self.redis.delete(self.taskset_key)
 
     def generator_clear(self) -> None:
+        """
+        清除生成器的进度和完成状态
+        """
         self.redis.delete(self.generator_progress_key)
         self.redis.delete(self.generator_complete_key)
 
     def get_remaining(self) -> int:
+        """
+        获取剩余待处理任务数量
+        
+        返回值：
+            int: 剩余任务数量
+        """
         remaining = cast(int, self.redis.scard(self.taskset_key))
         return remaining
 
     def get_active_task_count(self) -> int:
-        """Count of active permission sync tasks"""
+        """Count of active permission sync tasks
+        获取当前活动的权限同步任务数量
+        
+        返回值：
+            int: 活动任务数量
+        """
         count = 0
         for _ in self.redis.scan_iter(RedisConnectorPermissionSync.FENCE_PREFIX + "*"):
             count += 1
@@ -74,6 +116,12 @@ class RedisConnectorPermissionSync:
 
     @property
     def fenced(self) -> bool:
+        """
+        检查是否存在fence标记
+        
+        返回值：
+            bool: 是否存在fence标记
+        """
         if self.redis.exists(self.fence_key):
             return True
 
@@ -81,6 +129,12 @@ class RedisConnectorPermissionSync:
 
     @property
     def payload(self) -> RedisConnectorPermissionSyncPayload | None:
+        """
+        获取当前fence的负载数据
+        
+        返回值：
+            RedisConnectorPermissionSyncPayload | None: 负载数据或None
+        """
         # read related data and evaluate/print task progress
         fence_bytes = cast(bytes, self.redis.get(self.fence_key))
         if fence_bytes is None:
@@ -97,6 +151,12 @@ class RedisConnectorPermissionSync:
         self,
         payload: RedisConnectorPermissionSyncPayload | None,
     ) -> None:
+        """
+        设置fence的负载数据
+        
+        参数：
+            payload: 要设置的负载数据
+        """
         if not payload:
             self.redis.delete(self.fence_key)
             return
@@ -106,7 +166,9 @@ class RedisConnectorPermissionSync:
     @property
     def generator_complete(self) -> int | None:
         """the fence payload is an int representing the starting number of
-        permission sync tasks to be processed ... just after the generator completes."""
+        permission sync tasks to be processed ... just after the generator completes.
+        fence负载是一个整数，表示生成器完成后要处理的权限同步任务的初始数量。
+        """
         fence_bytes = self.redis.get(self.generator_complete_key)
         if fence_bytes is None:
             return None
@@ -120,7 +182,9 @@ class RedisConnectorPermissionSync:
     @generator_complete.setter
     def generator_complete(self, payload: int | None) -> None:
         """Set the payload to an int to set the fence, otherwise if None it will
-        be deleted"""
+        be deleted
+        设置fence负载为整数，如果为None则删除fence
+        """
         if payload is None:
             self.redis.delete(self.generator_complete_key)
             return
@@ -136,6 +200,20 @@ class RedisConnectorPermissionSync:
         connector_id: int,
         credential_id: int,
     ) -> int | None:
+        """
+        生成权限同步任务
+        
+        参数：
+            celery_app: Celery应用实例
+            lock: Redis锁对象
+            new_permissions: 新的权限列表
+            source_string: 来源标识
+            connector_id: 连接器ID
+            credential_id: 凭证ID
+            
+        返回值：
+            int | None: 生成的任务数量
+        """
         last_lock_time = time.monotonic()
         async_results = []
 
@@ -169,6 +247,9 @@ class RedisConnectorPermissionSync:
         return len(async_results)
 
     def reset(self) -> None:
+        """
+        重置所有相关的Redis键值
+        """
         self.redis.delete(self.generator_progress_key)
         self.redis.delete(self.generator_complete_key)
         self.redis.delete(self.taskset_key)
@@ -176,13 +257,23 @@ class RedisConnectorPermissionSync:
 
     @staticmethod
     def remove_from_taskset(id: int, task_id: str, r: redis.Redis) -> None:
+        """
+        从任务集合中移除指定任务
+        
+        参数：
+            id: 连接器ID
+            task_id: 任务ID
+            r: Redis客户端实例
+        """
         taskset_key = f"{RedisConnectorPermissionSync.TASKSET_PREFIX}_{id}"
         r.srem(taskset_key, task_id)
         return
 
     @staticmethod
     def reset_all(r: redis.Redis) -> None:
-        """Deletes all redis values for all connectors"""
+        """Deletes all redis values for all connectors
+        删除所有连接器的所有Redis值
+        """
         for key in r.scan_iter(RedisConnectorPermissionSync.TASKSET_PREFIX + "*"):
             r.delete(key)
 

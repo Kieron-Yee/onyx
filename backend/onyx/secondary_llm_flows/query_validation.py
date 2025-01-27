@@ -1,4 +1,14 @@
+"""
+本模块用于验证用户查询的有效性和可答性。
+主要功能包括:
+1. 分析用户查询是否可以被系统回答
+2. 提供查询验证的同步和异步流式处理
+3. 提取和解析查询验证的结果
+"""
+
 # NOTE No longer used. This needs to be revisited later.
+# 注: 此代码当前未使用。需要后续重新审查。
+
 import re
 from collections.abc import Iterator
 
@@ -20,6 +30,15 @@ logger = setup_logger()
 
 
 def get_query_validation_messages(user_query: str) -> list[dict[str, str]]:
+    """
+    生成用于查询验证的消息列表。
+    
+    Args:
+        user_query (str): 用户的查询文本
+        
+    Returns:
+        list[dict[str, str]]: 包含角色和内容的消息列表
+    """
     messages = [
         {
             "role": "user",
@@ -31,6 +50,15 @@ def get_query_validation_messages(user_query: str) -> list[dict[str, str]]:
 
 
 def extract_answerability_reasoning(model_raw: str) -> str:
+    """
+    从模型原始输出中提取推理说明部分。
+    
+    Args:
+        model_raw (str): 模型的原始输出文本
+        
+    Returns:
+        str: 提取出的推理说明文本
+    """
     reasoning_match = re.search(
         f"{THOUGHT_PAT.upper()}(.*?){ANSWERABLE_PAT.upper()}", model_raw, re.DOTALL
     )
@@ -39,6 +67,15 @@ def extract_answerability_reasoning(model_raw: str) -> str:
 
 
 def extract_answerability_bool(model_raw: str) -> bool:
+    """
+    从模型原始输出中提取可答性的布尔值结果。
+    
+    Args:
+        model_raw (str): 模型的原始输出文本
+        
+    Returns:
+        bool: True表示可以回答，False表示不能回答
+    """
     answerable_match = re.search(f"{ANSWERABLE_PAT.upper()}(.+)", model_raw)
     answerable_text = answerable_match.group(1).strip() if answerable_match else ""
     answerable = True if answerable_text.strip().lower() in ["true", "yes"] else False
@@ -48,6 +85,16 @@ def extract_answerability_bool(model_raw: str) -> bool:
 def get_query_answerability(
     user_query: str, skip_check: bool = False
 ) -> tuple[str, bool]:
+    """
+    同步方式获取查询的可答性评估结果。
+    
+    Args:
+        user_query (str): 用户的查询文本
+        skip_check (bool): 是否跳过检查，默认False
+        
+    Returns:
+        tuple[str, bool]: (推理说明, 是否可回答)的元组
+    """
     if skip_check:
         return "Query Answerability Evaluation feature is turned off", True
 
@@ -69,6 +116,19 @@ def get_query_answerability(
 def stream_query_answerability(
     user_query: str, skip_check: bool = False
 ) -> Iterator[str]:
+    """
+    异步流式方式获取查询的可答性评估结果。
+    
+    Args:
+        user_query (str): 用户的查询文本
+        skip_check (bool): 是否跳过检查，默认False
+        
+    Returns:
+        Iterator[str]: 生成包含评估结果的JSON字符串的迭代器
+    
+    Raises:
+        Exception: 在处理过程中可能发生的异常
+    """
     if skip_check:
         yield get_json_line(
             QueryValidationResponse(

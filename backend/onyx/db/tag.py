@@ -1,3 +1,8 @@
+"""
+这个文件主要负责处理文档标签(Tag)相关的数据库操作，包括标签的创建、查询和删除等功能。
+提供了一系列函数来管理文档和标签之间的关联关系，以及处理孤立标签的清理工作。
+"""
+
 from sqlalchemy import and_
 from sqlalchemy import delete
 from sqlalchemy import func
@@ -15,10 +20,15 @@ logger = setup_logger()
 
 
 def check_tag_validity(tag_key: str, tag_value: str) -> bool:
-    """If a tag is too long, it should not be used (it will cause an error in Postgres
+    """检查标签的有效性
+    
+    如果标签过长，则不应使用（这会在Postgres中导致错误，因为唯一约束只能应用于小于2704字节的条目）。
+    此外，过长的标签实际上也不太可用/有用。
+    
+    If a tag is too long, it should not be used (it will cause an error in Postgres
     as the unique constraint can only apply to entries that are less than 2704 bytes).
-
-    Additionally, extremely long tags are not really usable / useful."""
+    Additionally, extremely long tags are not really usable / useful.
+    """
     if len(tag_key) + len(tag_value) > 255:
         logger.error(
             f"Tag with key '{tag_key}' and value '{tag_value}' is too long, cannot be used"
@@ -35,6 +45,11 @@ def create_or_add_document_tag(
     document_id: str,
     db_session: Session,
 ) -> Tag | None:
+    """创建新标签或将现有标签添加到文档中
+    
+    该函数会检查标签是否存在，如果不存在则创建新标签。
+    然后将标签与指定的文档关联起来。如果标签已经与文档关联，则不会重复添加。
+    """
     if not check_tag_validity(tag_key, tag_value):
         return None
 
@@ -67,6 +82,14 @@ def create_or_add_document_tag_list(
     document_id: str,
     db_session: Session,
 ) -> list[Tag]:
+    """批量创建或添加多个标签到文档中
+    
+    这个函数可以一次性处理多个标签值，它会：
+    1. 过滤出有效的标签值
+    2. 检查已存在的标签
+    3. 创建不存在的标签
+    4. 将所有标签关联到指定文档
+    """
     valid_tag_values = [
         tag_value for tag_value in tag_values if check_tag_validity(tag_key, tag_value)
     ]
@@ -114,9 +137,16 @@ def find_tags(
     sources: list[DocumentSource] | None,
     limit: int | None,
     db_session: Session,
-    # if set, both tag_key_prefix and tag_value_prefix must be a match
     require_both_to_match: bool = False,
 ) -> list[Tag]:
+    """查找符合条件的标签
+    
+    支持通过标签键前缀、值前缀和来源来搜索标签。
+    可以设置是否要求键和值前缀都匹配，以及限制返回结果的数量。
+    
+    # if set, both tag_key_prefix and tag_value_prefix must be a match
+    # 如果设置为True，则标签键前缀和值前缀都必须匹配
+    """
     query = select(Tag)
 
     if tag_key_prefix or tag_value_prefix:
@@ -146,6 +176,13 @@ def find_tags(
 def delete_document_tags_for_documents__no_commit(
     document_ids: list[str], db_session: Session
 ) -> None:
+    """删除指定文档的所有标签关联，并清理孤立标签
+    
+    这个函数会：
+    1. 删除指定文档ID列表中所有文档的标签关联
+    2. 查找并删除不再与任何文档关联的孤立标签
+    注意：此函数不会自动提交事务，需要调用方手动提交
+    """
     stmt = delete(Document__Tag).where(Document__Tag.document_id.in_(document_ids))
     db_session.execute(stmt)
 

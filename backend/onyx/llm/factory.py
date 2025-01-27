@@ -1,3 +1,11 @@
+"""
+这是一个LLM工厂模块，负责创建和管理各种LLM（大语言模型）实例。
+主要功能包括：
+- 创建默认LLM实例
+- 根据persona配置创建特定LLM实例
+- 处理LLM提供商的配置和初始化
+"""
+
 from typing import Any
 
 from onyx.chat.models import PersonaOverrideConfig
@@ -22,9 +30,18 @@ logger = setup_logger()
 
 def _build_extra_model_kwargs(provider: str) -> dict[str, Any]:
     """Ollama requires us to specify the max context window.
-
     For now, just using the GEN_AI_MODEL_FALLBACK_MAX_TOKENS value.
     TODO: allow model-specific values to be configured via the UI.
+
+    Ollama需要我们指定最大上下文窗口。
+    目前暂时使用GEN_AI_MODEL_FALLBACK_MAX_TOKENS值。
+    待办：允许通过UI配置特定模型的值。
+
+    参数:
+        provider: LLM提供商名称
+
+    返回:
+        包含额外模型参数的字典
     """
     return {"num_ctx": GEN_AI_MODEL_FALLBACK_MAX_TOKENS} if provider == "ollama" else {}
 
@@ -32,6 +49,15 @@ def _build_extra_model_kwargs(provider: str) -> dict[str, Any]:
 def get_main_llm_from_tuple(
     llms: tuple[LLM, LLM],
 ) -> LLM:
+    """
+    从LLM元组中获取主要的LLM实例
+
+    参数:
+        llms: 包含两个LLM实例的元组，通常是(主模型, 快速模型)
+
+    返回:
+        主要的LLM实例
+    """
     return llms[0]
 
 
@@ -41,6 +67,18 @@ def get_llms_for_persona(
     additional_headers: dict[str, str] | None = None,
     long_term_logger: LongTermLogger | None = None,
 ) -> tuple[LLM, LLM]:
+    """
+    根据persona配置获取对应的LLM实例对
+
+    参数:
+        persona: persona配置对象或重写配置
+        llm_override: LLM重写配置
+        additional_headers: 额外的请求头
+        long_term_logger: 长期日志记录器
+
+    返回:
+        包含主模型和快速模型的LLM实例元组
+    """
     if persona is None:
         logger.warning("No persona provided, using default LLMs")
         return get_default_llms()
@@ -93,6 +131,22 @@ def get_default_llms(
     additional_headers: dict[str, str] | None = None,
     long_term_logger: LongTermLogger | None = None,
 ) -> tuple[LLM, LLM]:
+    """
+    获取默认的LLM实例对
+
+    参数:
+        timeout: 请求超时时间
+        temperature: 温度参数，控制输出的随机性
+        additional_headers: 额外的请求头
+        long_term_logger: 长期日志记录器
+
+    返回:
+        包含主模型和快速模型的默认LLM实例元组
+
+    异常:
+        GenAIDisabledException: 当生成式AI被禁用时抛出
+        ValueError: 当找不到默认提供商或模型名称时抛出
+    """
     if DISABLE_GENERATIVE_AI:
         raise GenAIDisabledException()
 
@@ -142,6 +196,25 @@ def get_llm(
     additional_headers: dict[str, str] | None = None,
     long_term_logger: LongTermLogger | None = None,
 ) -> LLM:
+    """
+    创建单个LLM实例
+
+    参数:
+        provider: LLM提供商名称
+        model: 模型名称
+        deployment_name: 部署名称
+        api_key: API密钥
+        api_base: API基础URL
+        api_version: API版本
+        custom_config: 自定义配置
+        temperature: 温度参数
+        timeout: 超时时间
+        additional_headers: 额外的请求头
+        long_term_logger: 长期日志记录器
+
+    返回:
+        配置好的LLM实例
+    """
     if temperature is None:
         temperature = GEN_AI_TEMPERATURE
     return DefaultMultiLLM(

@@ -1,3 +1,13 @@
+"""
+This file contains the data models related to personas and their configurations
+此文件包含与personas及其配置相关的数据模型
+
+主要功能：
+1. 定义了persona相关的请求和响应模型
+2. 提供了persona数据的序列化和反序列化功能
+3. 包含了persona类别管理的相关模型
+"""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -19,6 +29,15 @@ logger = setup_logger()
 
 # More minimal request for generating a persona prompt
 class GenerateStarterMessageRequest(BaseModel):
+    """
+    用于生成persona初始消息的请求模型
+    
+    属性：
+        name: persona的名称
+        description: persona的描述
+        instructions: 指令内容
+        document_set_ids: 文档集ID列表
+    """
     name: str
     description: str
     instructions: str
@@ -26,6 +45,34 @@ class GenerateStarterMessageRequest(BaseModel):
 
 
 class CreatePersonaRequest(BaseModel):
+    """
+    创建persona的请求模型
+    
+    属性：
+        name: persona名称
+        description: persona描述
+        num_chunks: 块数
+        llm_relevance_filter: 是否启用LLM相关性过滤
+        is_public: 是否公开
+        llm_filter_extraction: 是否启用LLM过滤提取
+        recency_bias: 时间偏好设置
+        prompt_ids: 提示词ID列表
+        document_set_ids: 文档集ID列表
+        tool_ids: 工具ID列表
+        llm_model_provider_override: LLM提供商覆盖设置
+        llm_model_version_override: LLM版本覆盖设置
+        starter_messages: 初始消息列表
+        users: 可访问的用户UUID列表
+        groups: 可访问的用户组ID列表
+        icon_color: 图标颜色
+        icon_shape: 图标形状
+        uploaded_image_id: 上传的图片ID
+        remove_image: 是否移除图片
+        is_default_persona: 是否为默认persona
+        display_priority: 显示优先级
+        search_start_date: 搜索起始日期
+        category_id: 类别ID
+    """
     name: str
     description: str
     num_chunks: float
@@ -54,6 +101,12 @@ class CreatePersonaRequest(BaseModel):
 
 
 class PersonaSnapshot(BaseModel):
+    """
+    Persona快照模型，用于序列化和展示Persona信息
+    
+    属性：
+        [属性列表与CreatePersonaRequest类似，此处省略]
+    """
     id: int
     owner: MinimalUserSnapshot | None
     name: str
@@ -84,6 +137,19 @@ class PersonaSnapshot(BaseModel):
     def from_model(
         cls, persona: Persona, allow_deleted: bool = False
     ) -> "PersonaSnapshot":
+        """
+        从数据库模型创建Persona快照
+        
+        参数：
+            persona: Persona数据库模型实例
+            allow_deleted: 是否允许已删除的Persona
+            
+        返回：
+            PersonaSnapshot实例
+            
+        异常：
+            ValueError: 当persona已删除且allow_deleted为False时抛出
+        """
         if persona.deleted:
             error_msg = f"Persona with ID {persona.id} has been deleted"
             if not allow_deleted:
@@ -131,29 +197,71 @@ class PersonaSnapshot(BaseModel):
 
 
 class PromptTemplateResponse(BaseModel):
+    """
+    提示模板响应模型
+    
+    属性：
+        final_prompt_template: 最终的提示模板字符串
+    """
     final_prompt_template: str
 
 
 class PersonaSharedNotificationData(BaseModel):
+    """
+    Persona共享通知数据模型
+    
+    属性：
+        persona_id: 被共享的PersonaID
+    """
     persona_id: int
 
 
 class ImageGenerationToolStatus(BaseModel):
+    """
+    图片生成工具状态模型
+    
+    属性：
+        is_available: 工具是否可用
+    """
     is_available: bool
 
 
 class PersonaCategoryCreate(BaseModel):
+    """
+    Persona类别创建请求模型
+    
+    属性：
+        name: 类别名称
+        description: 类别描述
+    """
     name: str
     description: str
 
 
 class PersonaCategoryResponse(BaseModel):
+    """
+    Persona类别响应模型
+    
+    属性：
+        id: 类别ID
+        name: 类别名称
+        description: 类别描述
+    """
     id: int
     name: str
     description: str | None
 
     @classmethod
     def from_model(cls, category: PersonaCategory) -> "PersonaCategoryResponse":
+        """
+        从数据库模型创建类别响应对象
+        
+        参数：
+            category: PersonaCategory数据库模型实例
+            
+        返回：
+            PersonaCategoryResponse实例
+        """
         return PersonaCategoryResponse(
             id=category.id,
             name=category.name,

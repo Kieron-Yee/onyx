@@ -1,3 +1,14 @@
+"""
+这个文件包含了Onyx系统的所有数据库模型定义。
+主要包括以下几个部分：
+1. 基础模型和类型定义
+2. 认证/授权相关模型
+3. 文档/索引相关模型
+4. 消息/对话相关模型
+5. 反馈/日志/指标相关模型
+6. 企业版特有功能相关模型
+"""
+
 import datetime
 import json
 from typing import Any
@@ -70,31 +81,53 @@ logger = setup_logger()
 
 
 class Base(DeclarativeBase):
+    """基础数据库模型类
+    所有其他模型类都继承自这个基类"""
     __abstract__ = True
 
 
 class EncryptedString(TypeDecorator):
+    """加密字符串类型
+    用于在数据库中安全存储敏感字符串数据,自动处理加密和解密"""
     impl = LargeBinary
-    # This type's behavior is fully deterministic and doesn't depend on any external factors.
     cache_ok = True
 
     def process_bind_param(self, value: str | None, dialect: Dialect) -> bytes | None:
+        """加密字符串值以便存储
+        Args:
+            value: 要加密的字符串
+            dialect: 数据库方言
+        Returns:
+            加密后的字节数据"""
         if value is not None:
             return encrypt_string_to_bytes(value)
         return value
 
     def process_result_value(self, value: bytes | None, dialect: Dialect) -> str | None:
+        """解密存储的加密数据
+        Args:
+            value: 加密的字节数据
+            dialect: 数据库方言
+        Returns:
+            解密后的字符串"""
         if value is not None:
             return decrypt_bytes_to_string(value)
         return value
 
 
 class EncryptedJson(TypeDecorator):
+    """加密JSON类型
+    用于在数据库中安全存储JSON数据,自动处理加密和解密"""
     impl = LargeBinary
-    # This type's behavior is fully deterministic and doesn't depend on any external factors.
     cache_ok = True
 
     def process_bind_param(self, value: dict | None, dialect: Dialect) -> bytes | None:
+        """加密JSON数据以便存储
+        Args:
+            value: 要加密的JSON数据
+            dialect: 数据库方言
+        Returns:
+            加密后的字节数据"""
         if value is not None:
             json_str = json.dumps(value)
             return encrypt_string_to_bytes(json_str)
@@ -103,6 +136,12 @@ class EncryptedJson(TypeDecorator):
     def process_result_value(
         self, value: bytes | None, dialect: Dialect
     ) -> dict | None:
+        """解密存储的加密JSON数据
+        Args:
+            value: 加密的字节数据 
+            dialect: 数据库方言
+        Returns:
+            解密后的JSON数据"""
         if value is not None:
             json_str = decrypt_bytes_to_string(value)
             return json.loads(json_str)
@@ -110,31 +149,47 @@ class EncryptedJson(TypeDecorator):
 
 
 class NullFilteredString(TypeDecorator):
+    """过滤空字符的字符串类型
+    用于去除字符串中的null字符"""
     impl = String
-    # This type's behavior is fully deterministic and doesn't depend on any external factors.
     cache_ok = True
 
     def process_bind_param(self, value: str | None, dialect: Dialect) -> str | None:
+        """处理输入字符串,移除null字符
+        Args:
+            value: 输入字符串
+            dialect: 数据库方言
+        Returns:
+            处理后的字符串"""
         if value is not None and "\x00" in value:
-            logger.warning(f"NUL characters found in value: {value}")
+            logger.warning(f"NUL characters found in value: {value}")  # 在值中发现NUL字符
             return value.replace("\x00", "")
         return value
 
     def process_result_value(self, value: str | None, dialect: Dialect) -> str | None:
+        """返回存储的字符串值
+        Args: 
+            value: 存储的字符串
+            dialect: 数据库方言
+        Returns:
+            字符串值"""
         return value
 
 
 """
-Auth/Authz (users, permissions, access) Tables
+认证/授权相关类
 """
 
-
 class OAuthAccount(SQLAlchemyBaseOAuthAccountTableUUID, Base):
+    """OAuth账户模型类
+    用于存储OAuth认证相关的账户信息"""
     # even an almost empty token from keycloak will not fit the default 1024 bytes
     access_token: Mapped[str] = mapped_column(Text, nullable=False)  # type: ignore
 
 
 class User(SQLAlchemyBaseUserTableUUID, Base):
+    """用户模型类
+    存储用户的基本信息、权限和首选项设置"""
     oauth_accounts: Mapped[list[OAuthAccount]] = relationship(
         "OAuthAccount", lazy="joined", cascade="all, delete-orphan"
     )
@@ -143,8 +198,7 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     )
 
     """
-    Preferences probably should be in a separate table at some point, but for now
-    putting here for simpicity
+    首选项在未来可能会放在单独的表中，但目前为了简单起见放在这里
     """
 
     # if specified, controls the assistants that are shown to the user + their order
@@ -200,10 +254,14 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
 
 
 class AccessToken(SQLAlchemyBaseAccessTokenTableUUID, Base):
+    """访问令牌模型类
+    用于存储用户的访问令牌信息"""
     pass
 
 
 class ApiKey(Base):
+    """API密钥模型类
+    用于存储和管理API访问密钥"""
     __tablename__ = "api_key"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -223,6 +281,8 @@ class ApiKey(Base):
 
 
 class Notification(Base):
+    """通知模型类
+    用于存储和管理系统向用户发送的各类通知"""
     __tablename__ = "notification"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -243,12 +303,14 @@ class Notification(Base):
 
 
 """
-Association Tables
+关联表类
 NOTE: must be at the top since they are referenced by other tables
 """
 
 
 class Persona__DocumentSet(Base):
+    """人格与文档集关联表
+    用于建立人格和文档集之间的多对多关系"""
     __tablename__ = "persona__document_set"
 
     persona_id: Mapped[int] = mapped_column(ForeignKey("persona.id"), primary_key=True)
@@ -258,6 +320,8 @@ class Persona__DocumentSet(Base):
 
 
 class Persona__Prompt(Base):
+    """人格与提示词关联表
+    用于建立人格和提示词之间的多对多关系"""
     __tablename__ = "persona__prompt"
 
     persona_id: Mapped[int] = mapped_column(ForeignKey("persona.id"), primary_key=True)
@@ -265,6 +329,8 @@ class Persona__Prompt(Base):
 
 
 class Persona__User(Base):
+    """人格与用户关联表
+    用于建立人格和用户之间的多对多关系""" 
     __tablename__ = "persona__user"
 
     persona_id: Mapped[int] = mapped_column(ForeignKey("persona.id"), primary_key=True)
@@ -274,6 +340,8 @@ class Persona__User(Base):
 
 
 class DocumentSet__User(Base):
+    """文档集与用户关联表
+    用于建立文档集和用户之间的多对多关系"""
     __tablename__ = "document_set__user"
 
     document_set_id: Mapped[int] = mapped_column(
@@ -285,6 +353,8 @@ class DocumentSet__User(Base):
 
 
 class DocumentSet__ConnectorCredentialPair(Base):
+    """文档集与连接器凭据对关联表
+    用于管理文档集和连接器凭据对之间的关系"""
     __tablename__ = "document_set__connector_credential_pair"
 
     document_set_id: Mapped[int] = mapped_column(
@@ -293,11 +363,10 @@ class DocumentSet__ConnectorCredentialPair(Base):
     connector_credential_pair_id: Mapped[int] = mapped_column(
         ForeignKey("connector_credential_pair.id"), primary_key=True
     )
-    # if `True`, then is part of the current state of the document set
-    # if `False`, then is a part of the prior state of the document set
-    # rows with `is_current=False` should be deleted when the document
-    # set is updated and should not exist for a given document set if
-    # `DocumentSet.is_up_to_date == True`
+    # 如果为True，则是文档集当前状态的一部分 
+    # 如果为False，则是文档集之前状态的一部分
+    # 当文档集更新后，is_current=False的行应该被删除
+    # 当DocumentSet.is_up_to_date为True时，不应该存在这样的行
     is_current: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -309,6 +378,8 @@ class DocumentSet__ConnectorCredentialPair(Base):
 
 
 class ChatMessage__SearchDoc(Base):
+    """聊天消息与搜索文档关联表
+    用于关联聊天消息和相关的搜索文档"""
     __tablename__ = "chat_message__search_doc"
 
     chat_message_id: Mapped[int] = mapped_column(
@@ -320,6 +391,8 @@ class ChatMessage__SearchDoc(Base):
 
 
 class Document__Tag(Base):
+    """文档与标签关联表
+    用于管理文档和标签之间的多对多关系"""
     __tablename__ = "document__tag"
 
     document_id: Mapped[str] = mapped_column(
@@ -329,6 +402,8 @@ class Document__Tag(Base):
 
 
 class Persona__Tool(Base):
+    """人格与工具关联表
+    用于管理人格和工具之间的多对多关系"""
     __tablename__ = "persona__tool"
 
     persona_id: Mapped[int] = mapped_column(ForeignKey("persona.id"), primary_key=True)
@@ -336,6 +411,8 @@ class Persona__Tool(Base):
 
 
 class StandardAnswer__StandardAnswerCategory(Base):
+    """标准答案与分类关联表
+    用于管理标准答案和分类之间的多对多关系"""
     __tablename__ = "standard_answer__standard_answer_category"
 
     standard_answer_id: Mapped[int] = mapped_column(
@@ -358,6 +435,8 @@ class SlackChannelConfig__StandardAnswerCategory(Base):
 
 
 class ChatMessage__StandardAnswer(Base):
+    """聊天消息与标准答案关联表
+    用于关联聊天消息和使用的标准答案"""
     __tablename__ = "chat_message__standard_answer"
 
     chat_message_id: Mapped[int] = mapped_column(
@@ -369,16 +448,12 @@ class ChatMessage__StandardAnswer(Base):
 
 
 """
-Documents/Indexing Tables
+文档和索引相关类
 """
 
-
 class ConnectorCredentialPair(Base):
-    """Connectors and Credentials can have a many-to-many relationship
-    I.e. A Confluence Connector may have multiple admin users who can run it with their own credentials
-    I.e. An admin user may use the same credential to index multiple Confluence Spaces
-    """
-
+    """连接器凭据对模型类
+    用于管理连接器和凭据之间的关系，支持文档索引和同步"""
     __tablename__ = "connector_credential_pair"
     # NOTE: this `id` column has to use `Sequence` instead of `autoincrement=True`
     # due to some SQLAlchemy quirks + this not being a primary key column
@@ -468,6 +543,8 @@ class ConnectorCredentialPair(Base):
 
 
 class Document(Base):
+    """文档模型类 
+    存储所有索引文档的元数据和访问控制信息"""
     __tablename__ = "document"
     # NOTE: if more sensitive data is added here for display, make sure to add user/group permission
 
@@ -531,7 +608,7 @@ class Document(Base):
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
     retrieval_feedbacks: Mapped[list["DocumentRetrievalFeedback"]] = relationship(
-        "DocumentRetrievalFeedback", back_populates="document"
+        "Document", back_populates="retrieval_feedbacks"
     )
     tags = relationship(
         "Tag",
@@ -541,6 +618,8 @@ class Document(Base):
 
 
 class Tag(Base):
+    """标签模型类
+    用于对文档进行分类和标记"""
     __tablename__ = "tag"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -564,6 +643,8 @@ class Tag(Base):
 
 
 class Connector(Base):
+    """连接器模型类
+    定义了不同类型的数据源连接器，用于从各种来源获取文档"""
     __tablename__ = "connector"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -602,21 +683,27 @@ class Connector(Base):
     # TODO(rkuo): experiment with SQLAlchemy validators rather than manual checks
     # https://docs.sqlalchemy.org/en/20/orm/mapped_attributes.html
     def validate_refresh_freq(self) -> None:
+        """验证刷新频率
+        确保刷新频率不小于60秒"""
         if self.refresh_freq is not None:
             if self.refresh_freq < 60:
                 raise ValueError(
-                    "refresh_freq must be greater than or equal to 60 seconds."
+                    "刷新频率必须大于或等于60秒"
                 )
 
     def validate_prune_freq(self) -> None:
+        """验证清理频率
+        确保清理频率不小于86400秒(1天)"""
         if self.prune_freq is not None:
             if self.prune_freq < 86400:
                 raise ValueError(
-                    "prune_freq must be greater than or equal to 86400 seconds."
+                    "清理频率必须大于或等于86400秒"
                 )
 
 
 class Credential(Base):
+    """凭据模型类
+    存储访问各种数据源所需的认证信息"""
     __tablename__ = "credential"
 
     name: Mapped[str] = mapped_column(String, nullable=True)
@@ -654,6 +741,8 @@ class Credential(Base):
 
 
 class SearchSettings(Base):
+    """搜索设置模型类
+    管理文档检索和嵌入模型的配置"""
     __tablename__ = "search_settings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -720,12 +809,16 @@ class SearchSettings(Base):
 
     @property
     def api_version(self) -> str | None:
+        """获取API版本号
+        如果存在cloud_provider则返回其api_version，否则返回None"""
         return (
             self.cloud_provider.api_version if self.cloud_provider is not None else None
         )
 
-    @property
+    @property 
     def deployment_name(self) -> str | None:
+        """获取部署名称
+        如果存在cloud_provider则返回其deployment_name，否则返回None"""
         return (
             self.cloud_provider.deployment_name
             if self.cloud_provider is not None
@@ -734,18 +827,23 @@ class SearchSettings(Base):
 
     @property
     def api_url(self) -> str | None:
+        """获取API URL
+        如果存在cloud_provider则返回其api_url，否则返回None"""
         return self.cloud_provider.api_url if self.cloud_provider is not None else None
 
     @property
     def api_key(self) -> str | None:
+        """获取API密钥
+        如果存在cloud_provider则返回其api_key，否则返回None"""
         return self.cloud_provider.api_key if self.cloud_provider is not None else None
 
 
 class IndexAttempt(Base):
     """
-    Represents an attempt to index a group of 1 or more documents from a
-    source. For example, a single pull from Google Drive, a single event from
-    slack event API, or a single website crawl.
+    索引尝试模型类
+    表示对一个或多个文档进行索引的尝试。
+    例如，从Google Drive进行一次拉取，从slack事件API接收一个事件，
+    或者对网站进行一次爬取。
     """
 
     __tablename__ = "index_attempt"
@@ -757,22 +855,21 @@ class IndexAttempt(Base):
         nullable=False,
     )
 
-    # Some index attempts that run from beginning will still have this as False
-    # This is only for attempts that are explicitly marked as from the start via
-    # the run once API
+    # 从头开始运行的一些索引尝试仍然会将其设置为False
+    # 这仅用于通过运行一次API显式标记为从头开始的尝试
     from_beginning: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[IndexingStatus] = mapped_column(
         Enum(IndexingStatus, native_enum=False)
     )
-    # The two below may be slightly out of sync if user switches Embedding Model
+    # 如果切换了嵌入模型，下面两个字段可能会略有不同步
     new_docs_indexed: Mapped[int | None] = mapped_column(Integer, default=0)
     total_docs_indexed: Mapped[int | None] = mapped_column(Integer, default=0)
     docs_removed_from_index: Mapped[int | None] = mapped_column(Integer, default=0)
-    # only filled if status = "failed"
+    # 仅在status = "failed"时填充
     error_msg: Mapped[str | None] = mapped_column(Text, default=None)
-    # only filled if status = "failed" AND an unhandled exception caused the failure
+    # 仅在status = "failed"且出现未处理异常时填充
     full_exception_trace: Mapped[str | None] = mapped_column(Text, default=None)
-    # Nullable because in the past, we didn't allow swapping out embedding models live
+    # 可为空是因为过去我们不允许动态切换嵌入模型
     search_settings_id: Mapped[int] = mapped_column(
         ForeignKey("search_settings.id", ondelete="SET NULL"),
         nullable=True,
@@ -782,8 +879,8 @@ class IndexAttempt(Base):
         DateTime(timezone=True),
         server_default=func.now(),
     )
-    # when the actual indexing run began
-    # NOTE: will use the api_server clock rather than DB server clock
+    # 当实际索引运行开始时
+    # 注意：将使用api_server时钟而不是DB服务器时钟
     time_started: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), default=None
     )
@@ -825,12 +922,15 @@ class IndexAttempt(Base):
         )
 
     def is_finished(self) -> bool:
+        """检查索引任务是否完成
+        通过检查状态是否为终态来判断"""
         return self.status.is_terminal()
 
 
 class IndexAttemptError(Base):
     """
-    Represents an error that was encountered during an IndexAttempt.
+    索引尝试错误模型类
+    记录索引尝试过程中遇到的错误
     """
 
     __tablename__ = "index_attempt_errors"
@@ -842,8 +942,8 @@ class IndexAttemptError(Base):
         nullable=True,
     )
 
-    # The index of the batch where the error occurred (if looping thru batches)
-    # Just informational.
+    # 批处理中发生错误的索引(如果正在遍历批次)
+    # 仅供参考
     batch: Mapped[int | None] = mapped_column(Integer, default=None)
     doc_summaries: Mapped[list[Any]] = mapped_column(postgresql.JSONB())
     error_msg: Mapped[str | None] = mapped_column(Text, default=None)
@@ -853,7 +953,7 @@ class IndexAttemptError(Base):
         server_default=func.now(),
     )
 
-    # This is the reverse side of the relationship
+    # 这是关系的反向引用
     index_attempt = relationship("IndexAttempt", back_populates="error_rows")
 
     __table_args__ = (
@@ -904,18 +1004,12 @@ class DocumentByConnectorCredentialPair(Base):
 
 
 """
-Messages Tables
+消息相关类
 """
 
-
 class SearchDoc(Base):
-    """Different from Document table. This one stores the state of a document from a retrieval.
-    This allows chat sessions to be replayed with the searched docs
-
-    Notably, this does not include the contents of the Document/Chunk, during inference if a stored
-    SearchDoc is selected, an inference must be remade to retrieve the contents
-    """
-
+    """搜索文档模型类
+    存储检索到的文档片段状态，支持对话重放"""
     __tablename__ = "search_doc"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -955,13 +1049,12 @@ class SearchDoc(Base):
 
 
 class ToolCall(Base):
-    """Represents a single tool call"""
-
+    """工具调用模型类
+    记录单次工具调用的信息，包括参数和结果"""
     __tablename__ = "tool_call"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # not a FK because we want to be able to delete the tool without deleting
-    # this entry
+    # 不使用外键因为我们希望可以删除工具但保留调用记录
     tool_id: Mapped[int] = mapped_column(Integer())
     tool_name: Mapped[str] = mapped_column(String())
     tool_arguments: Mapped[dict[str, JSON_ro]] = mapped_column(postgresql.JSONB())
@@ -980,6 +1073,8 @@ class ToolCall(Base):
 
 
 class ChatSession(Base):
+    """聊天会话模型类
+    管理用户的聊天对话，包含会话设置和消息历史"""
     __tablename__ = "chat_session"
 
     id: Mapped[UUID] = mapped_column(
@@ -1042,14 +1137,8 @@ class ChatSession(Base):
 
 
 class ChatMessage(Base):
-    """Note, the first message in a chain has no contents, it's a workaround to allow edits
-    on the first message of a session, an empty root node basically
-
-    Since every user message is followed by a LLM response, chat messages generally come in pairs.
-    Keeping them as separate messages however for future Agentification extensions
-    Fields will be largely duplicated in the pair.
-    """
-
+    """聊天消息模型类
+    存储单条聊天消息，包含用户输入和AI响应"""
     __tablename__ = "chat_message"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1066,23 +1155,20 @@ class ChatMessage(Base):
     latest_child_message: Mapped[int | None] = mapped_column(Integer, nullable=True)
     message: Mapped[str] = mapped_column(Text)
     rephrased_query: Mapped[str] = mapped_column(Text, nullable=True)
-    # If None, then there is no answer generation, it's the special case of only
-    # showing the user the retrieved docs
+    # 如果为None，则不生成答案，这是仅向用户显示检索文档的特殊情况
     prompt_id: Mapped[int | None] = mapped_column(ForeignKey("prompt.id"))
-    # If prompt is None, then token_count is 0 as this message won't be passed into
-    # the LLM's context (not included in the history of messages)
+    # 如果prompt为None，则token_count为0，因为该消息不会传入LLM的上下文中(不包含在消息历史中)
     token_count: Mapped[int] = mapped_column(Integer)
     message_type: Mapped[MessageType] = mapped_column(
         Enum(MessageType, native_enum=False)
     )
-    # Maps the citation numbers to a SearchDoc id
+    # 将引用编号映射到SearchDoc id
     citations: Mapped[dict[int, int]] = mapped_column(postgresql.JSONB(), nullable=True)
-    # files associated with this message (e.g. images uploaded by the user that the
-    # user is asking a question of)
+    # 与此消息关联的文件(例如用户上传的用于提问的图片)
     files: Mapped[list[FileDescriptor] | None] = mapped_column(
         postgresql.JSONB(), nullable=True
     )
-    # Only applies for LLM
+    # 仅适用于LLM
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     time_sent: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -1122,12 +1208,12 @@ class ChatMessage(Base):
 
 
 class ChatFolder(Base):
-    """For organizing chat sessions"""
-
+    """聊天文件夹模型类
+    用于组织和管理聊天会话"""
     __tablename__ = "chat_folder"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # Only null if auth is off
+    # 只有在关闭认证时才为空
     user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="CASCADE"), nullable=True
     )
@@ -1140,20 +1226,23 @@ class ChatFolder(Base):
     )
 
     def __lt__(self, other: Any) -> bool:
+        """比较两个聊天文件夹的排序优先级
+        优先按display_priority排序，相同则按id倒序排序"""
         if not isinstance(other, ChatFolder):
             return NotImplemented
         if self.display_priority == other.display_priority:
-            # Bigger ID (created later) show earlier
+            # ID越大(越晚创建)显示越靠前
             return self.id > other.id
         return self.display_priority < other.display_priority
 
 
 """
-Feedback, Logging, Metrics Tables
+反馈和日志相关类
 """
 
-
 class DocumentRetrievalFeedback(Base):
+    """文档检索反馈模型类
+    记录用户对检索文档的反馈信息"""
     __tablename__ = "document_retrieval_feedback"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1179,6 +1268,8 @@ class DocumentRetrievalFeedback(Base):
 
 
 class ChatMessageFeedback(Base):
+    """聊天消息反馈模型类
+    存储用户对聊天消息的反馈"""
     __tablename__ = "chat_feedback"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1198,6 +1289,8 @@ class ChatMessageFeedback(Base):
 
 
 class LLMProvider(Base):
+    """语言模型提供者模型类
+    管理不同LLM服务提供者的配置和认证信息"""
     __tablename__ = "llm_provider"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1206,22 +1299,22 @@ class LLMProvider(Base):
     api_key: Mapped[str | None] = mapped_column(EncryptedString(), nullable=True)
     api_base: Mapped[str | None] = mapped_column(String, nullable=True)
     api_version: Mapped[str | None] = mapped_column(String, nullable=True)
-    # custom configs that should be passed to the LLM provider at inference time
-    # (e.g. `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, etc. for bedrock)
+    # 需要在推理时传递给LLM提供者的自定义配置
+    # (例如 AWS Bedrock 需要的 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY 等)
     custom_config: Mapped[dict[str, str] | None] = mapped_column(
         postgresql.JSONB(), nullable=True
     )
     default_model_name: Mapped[str] = mapped_column(String)
     fast_default_model_name: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    # Models to actually display to users
-    # If nulled out, we assume in the application logic we should present all
+    # 实际展示给用户的模型
+    # 如果为空，则在应用逻辑中默认展示所有模型
     display_model_names: Mapped[list[str] | None] = mapped_column(
         postgresql.ARRAY(String), nullable=True
     )
-    # The LLMs that are available for this provider. Only required if not a default provider.
-    # If a default provider, then the LLM options are pulled from the `options.py` file.
-    # If needed, can be pulled out as a separate table in the future.
+    # 该提供者可用的LLM列表。只在非默认提供者时需要。
+    # 如果是默认提供者，则从options.py文件获取LLM选项。
+    # 如果需要，可以在未来拆分为独立的表。
     model_names: Mapped[list[str] | None] = mapped_column(
         postgresql.ARRAY(String), nullable=True
     )
@@ -1240,6 +1333,8 @@ class LLMProvider(Base):
 
 
 class CloudEmbeddingProvider(Base):
+    """云端嵌入模型提供者模型类
+    管理文本嵌入服务的配置信息"""
     __tablename__ = "embedding_provider"
 
     provider_type: Mapped[EmbeddingProvider] = mapped_column(
@@ -1322,7 +1417,7 @@ class Prompt(Base):
     include_citations: Mapped[bool] = mapped_column(Boolean, default=True)
     datetime_aware: Mapped[bool] = mapped_column(Boolean, default=True)
     # Default prompts are configured via backend during deployment
-    # Treated specially (cannot be user edited etc.)
+    # Treated specially (不能被用户编辑等)
     default_prompt: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
@@ -1335,6 +1430,8 @@ class Prompt(Base):
 
 
 class Tool(Base):
+    """工具模型类
+    定义系统可用的各种工具和功能"""
     __tablename__ = "tool"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -1421,7 +1518,7 @@ class Persona(Base):
         DateTime(timezone=True), default=None
     )
     # Built-in personas are configured via backend during deployment
-    # Treated specially (cannot be user edited etc.)
+    # Treated specially (不能被用户编辑等)
     builtin_persona: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Default personas are personas created by admins and are automatically added
@@ -1491,6 +1588,8 @@ class Persona(Base):
 
 
 class PersonaCategory(Base):
+    """人格类别模型类
+    用于对不同的人格助手进行分类"""
     __tablename__ = "persona_category"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1515,13 +1614,15 @@ class ChannelConfig(TypedDict):
     respond_to_bots: NotRequired[bool]  # defaults to False
     respond_member_group_list: NotRequired[list[str]]
     answer_filters: NotRequired[list[AllowedAnswerFilters]]
-    # If None then no follow up
-    # If empty list, follow up with no tags
+    # 如果为None则不进行后续跟进
+    # 如果为空列表，则不带标签进行后续跟进
     follow_up_tags: NotRequired[list[str]]
     show_continue_in_web_ui: NotRequired[bool]  # defaults to False
 
 
 class SlackChannelConfig(Base):
+    """Slack频道配置模型类
+    管理Slack集成的频道配置信息"""
     __tablename__ = "slack_channel_config"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1553,6 +1654,8 @@ class SlackChannelConfig(Base):
 
 
 class SlackBot(Base):
+    """Slack机器人模型类
+    管理Slack机器人的配置和认证信息"""
     __tablename__ = "slack_bot"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1570,6 +1673,8 @@ class SlackBot(Base):
 
 
 class Milestone(Base):
+    """里程碑模型类
+    跟踪部署过程中的重要事件和进展"""
     # This table is used to track significant events for a deployment towards finding value
     # The table is currently not used for features but it may be used in the future to inform
     # users about the product features and encourage usage/exploration.
@@ -1596,6 +1701,8 @@ class Milestone(Base):
 
 
 class TaskQueueState(Base):
+    """任务队列状态模型类
+    管理后台任务的执行状态"""
     # Currently refers to Celery Tasks
     __tablename__ = "task_queue_jobs"
 
@@ -1615,6 +1722,8 @@ class TaskQueueState(Base):
 
 
 class KVStore(Base):
+    """键值存储模型类
+    通用键值对存储，支持加密存储"""
     __tablename__ = "key_value_store"
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
@@ -1623,6 +1732,8 @@ class KVStore(Base):
 
 
 class PGFileStore(Base):
+    """PostgreSQL文件存储模型类
+    用于在数据库中存储文件数据"""
     __tablename__ = "file_store"
 
     file_name: Mapped[str] = mapped_column(String, primary_key=True)
@@ -1645,8 +1756,13 @@ on the shape of data being passed around between the MIT and EE versions of Onyx
 In the MIT version of Onyx, assume these tables are always empty.
 """
 
+"""
+企业版特有类
+"""
 
 class SamlAccount(Base):
+    """SAML账户模型类
+    用于企业版SAML认证集成"""
     __tablename__ = "saml"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1663,6 +1779,8 @@ class SamlAccount(Base):
 
 
 class User__UserGroup(Base):
+    """用户与用户组关联表
+    用于建立用户和用户组之间的多对多关系"""
     __tablename__ = "user__user_group"
 
     is_curator: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -1676,6 +1794,8 @@ class User__UserGroup(Base):
 
 
 class UserGroup__ConnectorCredentialPair(Base):
+    """用户组与连接器凭据对关联表
+    用于管理用户组和连接器凭据对之间的关系"""
     __tablename__ = "user_group__connector_credential_pair"
 
     user_group_id: Mapped[int] = mapped_column(
@@ -1684,11 +1804,10 @@ class UserGroup__ConnectorCredentialPair(Base):
     cc_pair_id: Mapped[int] = mapped_column(
         ForeignKey("connector_credential_pair.id"), primary_key=True
     )
-    # if `True`, then is part of the current state of the UserGroup
-    # if `False`, then is a part of the prior state of the UserGroup
-    # rows with `is_current=False` should be deleted when the UserGroup
-    # is updated and should not exist for a given UserGroup if
-    # `UserGroup.is_up_to_date == True`
+    # 如果为True，则是用户组当前状态的一部分
+    # 如果为False，则是用户组之前状态的一部分
+    # 当用户组更新时，is_current=False的行应该被删除
+    # 当UserGroup.is_up_to_date为True时，不应该存在这样的行
     is_current: Mapped[bool] = mapped_column(
         Boolean,
         default=True,
@@ -1710,6 +1829,8 @@ class Persona__UserGroup(Base):
 
 
 class LLMProvider__UserGroup(Base):
+    """LLM提供者与用户组关联表
+    用于管理LLM提供者和用户组之间的访问权限"""
     __tablename__ = "llm_provider__user_group"
 
     llm_provider_id: Mapped[int] = mapped_column(
@@ -1721,6 +1842,8 @@ class LLMProvider__UserGroup(Base):
 
 
 class DocumentSet__UserGroup(Base):
+    """文档集与用户组关联表
+    用于管理文档集和用户组之间的访问权限"""
     __tablename__ = "document_set__user_group"
 
     document_set_id: Mapped[int] = mapped_column(
@@ -1732,6 +1855,8 @@ class DocumentSet__UserGroup(Base):
 
 
 class Credential__UserGroup(Base):
+    """凭据与用户组关联表
+    用于管理凭据和用户组之间的访问权限"""
     __tablename__ = "credential__user_group"
 
     credential_id: Mapped[int] = mapped_column(
@@ -1743,6 +1868,8 @@ class Credential__UserGroup(Base):
 
 
 class UserGroup(Base):
+    """用户组模型类
+    企业版用户组管理功能"""
     __tablename__ = "user_group"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1793,8 +1920,9 @@ class UserGroup(Base):
 NOTE: `TokenRateLimit` is partially an MIT feature (global rate limit)
 """
 
-
 class TokenRateLimit(Base):
+    """令牌速率限制模型类
+    管理API调用的速率限制策略"""
     __tablename__ = "token_rate_limit"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1810,6 +1938,8 @@ class TokenRateLimit(Base):
 
 
 class TokenRateLimit__UserGroup(Base):
+    """令牌限制与用户组关联表
+    用于管理令牌使用限制和用户组之间的关系"""
     __tablename__ = "token_rate_limit__user_group"
 
     rate_limit_id: Mapped[int] = mapped_column(
@@ -1821,6 +1951,8 @@ class TokenRateLimit__UserGroup(Base):
 
 
 class StandardAnswerCategory(Base):
+    """标准答案类别模型类
+    用于对标准答案进行分类管理"""
     __tablename__ = "standard_answer_category"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1838,6 +1970,8 @@ class StandardAnswerCategory(Base):
 
 
 class StandardAnswer(Base):
+    """标准答案模型类
+    存储预定义的问答对，用于快速响应常见问题"""
     __tablename__ = "standard_answer"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -1873,11 +2007,9 @@ class StandardAnswer(Base):
 
 
 class User__ExternalUserGroupId(Base):
-    """Maps user info both internal and external to the name of the external group
-    This maps the user to all of their external groups so that the external group name can be
-    attached to the ACL list matching during query time. User level permissions can be handled by
-    directly adding the Onyx user to the doc ACL list"""
-
+    """用户与外部用户组ID映射表
+    将用户映射到其所有外部组，以便在查询时进行ACL列表匹配
+    用户级别的权限可以通过直接将Onyx用户添加到文档ACL列表来处理"""
     __tablename__ = "user__external_user_group_id"
 
     user_id: Mapped[UUID] = mapped_column(ForeignKey("user.id"), primary_key=True)
@@ -1899,7 +2031,7 @@ class UsageReport(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     report_name: Mapped[str] = mapped_column(ForeignKey("file_store.file_name"))
 
-    # if None, report was auto-generated
+    # 如果为None，则表示自动生成的报告
     requestor_user_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="CASCADE"), nullable=True
     )
@@ -1925,6 +2057,8 @@ class PublicBase(DeclarativeBase):
 
 
 class UserTenantMapping(Base):
+    """用户租户映射模型类
+    管理多租户环境下用户与租户的对应关系"""
     __tablename__ = "user_tenant_mapping"
     __table_args__ = (
         UniqueConstraint("email", "tenant_id", name="uq_user_tenant"),

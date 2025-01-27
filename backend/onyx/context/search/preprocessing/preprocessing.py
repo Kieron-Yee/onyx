@@ -1,3 +1,12 @@
+"""
+该模块主要用于搜索查询的预处理操作。
+主要功能包括：
+1. 查询分析
+2. 检索预处理
+3. 过滤条件构建
+4. 搜索参数配置
+"""
+
 from sqlalchemy.orm import Session
 
 from onyx.configs.chat_configs import BASE_RECENCY_DECAY
@@ -41,6 +50,17 @@ logger = setup_logger()
 
 
 def query_analysis(query: str) -> tuple[bool, list[str]]:
+    """
+    对搜索查询进行分析。
+    
+    Args:
+        query (str): 需要分析的查询字符串
+    
+    Returns:
+        tuple[bool, list[str]]: 返回一个元组，包含:
+            - 是否为关键词查询的布尔值
+            - 提取出的关键词列表
+    """
     analysis_model = QueryAnalysisModel()
     return analysis_model.predict(query)
 
@@ -56,10 +76,29 @@ def retrieval_preprocessing(
     base_recency_decay: float = BASE_RECENCY_DECAY,
     favor_recent_decay_multiplier: float = FAVOR_RECENT_DECAY_MULTIPLIER,
 ) -> SearchQuery:
-    """Logic is as follows:
+    """
+    Logic is as follows:
     Any global disables apply first
     Then any filters or settings as part of the query are used
     Then defaults to Persona settings if not specified by the query
+    
+    处理逻辑如下：
+    首先应用全局禁用设置
+    然后使用查询中的过滤器或设置
+    如果查询中未指定，则使用Persona设置作为默认值
+    
+    Args:
+        search_request (SearchRequest): 搜索请求对象
+        user (User | None): 用户对象或None
+        llm (LLM): 语言模型接口
+        db_session (Session): 数据库会话
+        bypass_acl (bool): 是否绕过访问控制列表
+        skip_query_analysis (bool): 是否跳过查询分析
+        base_recency_decay (float): 基础时间衰减系数
+        favor_recent_decay_multiplier (float): 偏好最近文档的衰减乘数
+    
+    Returns:
+        SearchQuery: 处理后的搜索查询对象
     """
     query = search_request.query
     limit = search_request.limit
@@ -104,6 +143,7 @@ def retrieval_preprocessing(
 
     # Based on the query figure out if we should apply any hard time filters /
     # if we should bias more recent docs even more strongly
+    # 基于查询确定是否应该应用硬时间过滤器/是否应该更强烈地偏向最近的文档
     run_time_filters = (
         FunctionCall(extract_time_filter, (query, llm), {})
         if auto_detect_time_filter
@@ -111,6 +151,7 @@ def retrieval_preprocessing(
     )
 
     # Based on the query, figure out if we should apply any source filters
+    # 基于查询，确定是否应该应用任何来源过滤器
     run_source_filters = (
         FunctionCall(extract_source_filter, (query, llm, db_session), {})
         if auto_detect_source_filter
@@ -143,6 +184,8 @@ def retrieval_preprocessing(
 
     # The extracted keywords right now are not very reliable, not using for now
     # Can maybe use for highlighting
+    # 目前提取的关键词还不够可靠，暂时不使用
+    # 可能可以用于高亮显示
     is_keyword, extracted_keywords = (
         parallel_results[run_query_analysis.result_id]
         if run_query_analysis
@@ -153,6 +196,7 @@ def retrieval_preprocessing(
     processed_keywords = (
         remove_stop_words_and_punctuation(all_query_terms)
         # If the user is using a different language, don't edit the query or remove english stopwords
+        # 如果用户使用的是其他语言，不要编辑查询或删除英语停用词
         if not search_request.multilingual_expansion
         else all_query_terms
     )
@@ -165,6 +209,7 @@ def retrieval_preprocessing(
         document_set=preset_filters.document_set,
         time_cutoff=time_filter or predicted_time_cutoff,
         tags=preset_filters.tags,  # Tags are never auto-extracted
+        # 标签永远不会自动提取
         access_control_list=user_acl_filters,
         tenant_id=CURRENT_TENANT_ID_CONTEXTVAR.get() if MULTI_TENANT else None,
     )
@@ -189,14 +234,17 @@ def retrieval_preprocessing(
 
     rerank_settings = search_request.rerank_settings
     # If not explicitly specified by the query, use the current settings
+    # 如果查询没有明确指定，使用当前设置
     if rerank_settings is None:
         search_settings = get_current_search_settings(db_session)
 
         # For non-streaming flows, the rerank settings are applied at the search_request level
+        # 对于非流式处理，重排序设置在搜索请求级别应用
         if not search_settings.disable_rerank_for_streaming:
             rerank_settings = RerankingDetails.from_db_model(search_settings)
 
     # Decays at 1 / (1 + (multiplier * num years))
+    # 按照 1 / (1 + (乘数 * 年数)) 衰减
     if persona and persona.recency_bias == RecencyBiasSetting.NO_DECAY:
         recency_bias_multiplier = 0.0
     elif persona and persona.recency_bias == RecencyBiasSetting.BASE_DECAY:
@@ -216,6 +264,9 @@ def retrieval_preprocessing(
     # Search request overrides anything else as it's explicitly set by the request
     # If not explicitly specified, use the persona settings if they exist
     # Otherwise, use the global defaults
+    # 搜索请求优先级最高，因为它是由请求明确设置的
+    # 如果未明确指定，则使用persona设置（如果存在）
+    # 否则，使用全局默认值
     chunks_above = (
         search_request.chunks_above
         if search_request.chunks_above is not None
@@ -241,6 +292,9 @@ def retrieval_preprocessing(
         # Should match the LLM filtering to the same as the reranked, it's understood as this is the number of results
         # the user wants to do heavier processing on, so do the same for the LLM if reranking is on
         # if no reranking settings are set, then use the global default
+        # LLM过滤应该与重排序匹配，这被理解为用户想要进行更重处理的结果数量
+        # 如果启用了重排序，对LLM也做同样的处理
+        # 如果没有设置重排序设置，则使用全局默认值
         max_llm_filter_sections=rerank_settings.num_rerank
         if rerank_settings
         else NUM_POSTPROCESSED_RESULTS,

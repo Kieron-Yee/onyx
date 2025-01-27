@@ -1,3 +1,8 @@
+"""
+文档处理路由模块
+本模块提供了文档相关的API端点，包括获取文档信息和文档块信息的功能
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -23,14 +28,27 @@ from onyx.server.documents.models import DocumentInfo
 router = APIRouter(prefix="/document")
 
 
-# Have to use a query parameter as FastAPI is interpreting the URL type document_ids
-# as a different path
+# 必须使用查询参数，因为FastAPI将URL类型的document_ids解释为不同的路径
 @router.get("/document-size-info")
 def get_document_info(
     document_id: str = Query(...),
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> DocumentInfo:
+    """
+    获取文档大小信息的API端点
+
+    参数:
+        document_id: 文档ID
+        user: 当前用户对象
+        db_session: 数据库会话
+
+    返回:
+        DocumentInfo: 包含文档块数量和令牌数量的信息对象
+
+    异常:
+        HTTPException: 当文档未找到时抛出404错误
+    """
     search_settings = get_current_search_settings(db_session)
 
     document_index = get_default_document_index(
@@ -50,7 +68,7 @@ def get_document_info(
 
     combined_contents = "\n".join(contents)
 
-    # get actual document context used for LLM
+    # 获取用于LLM的实际文档上下文
     first_chunk = inference_chunks[0]
     tokenizer_encode = get_tokenizer(
         provider_type=search_settings.provider_type,
@@ -78,6 +96,21 @@ def get_chunk_info(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ChunkInfo:
+    """
+    获取文档块信息的API端点
+
+    参数:
+        document_id: 文档ID
+        chunk_id: 文档块ID
+        user: 当前用户对象
+        db_session: 数据库会话
+
+    返回:
+        ChunkInfo: 包含文档块内容和令牌数量的信息对象
+
+    异常:
+        HTTPException: 当文档块未找到时抛出404错误
+    """
     search_settings = get_current_search_settings(db_session)
 
     document_index = get_default_document_index(

@@ -1,3 +1,11 @@
+"""
+本模块用于从YAML配置文件中加载提示词(prompts)和角色(personas)数据。
+主要功能包括：
+1. 从YAML文件读取提示词配置并更新到数据库
+2. 从YAML文件读取角色配置并更新到数据库
+3. 提供统一的加载入口函数
+"""
+
 import yaml
 from sqlalchemy.orm import Session
 
@@ -18,6 +26,16 @@ from onyx.db.persona import upsert_prompt
 def load_prompts_from_yaml(
     db_session: Session, prompts_yaml: str = PROMPTS_YAML
 ) -> None:
+    """
+    从YAML文件加载提示词配置并更新到数据库。
+
+    参数:
+        db_session: 数据库会话对象
+        prompts_yaml: YAML配置文件路径，默认使用PROMPTS_YAML常量
+
+    返回:
+        None
+    """
     with open(prompts_yaml, "r") as file:
         data = yaml.safe_load(file)
 
@@ -44,6 +62,17 @@ def load_personas_from_yaml(
     personas_yaml: str = PERSONAS_YAML,
     default_chunks: float = MAX_CHUNKS_FED_TO_CHAT,
 ) -> None:
+    """
+    从YAML文件加载角色配置并更新到数据库。
+
+    参数:
+        db_session: 数据库会话对象
+        personas_yaml: YAML配置文件路径，默认使用PERSONAS_YAML常量
+        default_chunks: 默认的文档块数量，默认使用MAX_CHUNKS_FED_TO_CHAT常量
+
+    返回:
+        None
+    """
     with open(personas_yaml, "r") as file:
         data = yaml.safe_load(file)
 
@@ -59,6 +88,8 @@ def load_personas_from_yaml(
         # Assume if user hasn't set any document sets for the persona, the user may want
         # to later attach document sets to the persona manually, therefore, don't overwrite/reset
         # the document sets for the persona
+        # 如果用户没有为角色设置任何文档集，假定用户可能想稍后手动附加文档集到角色，
+        # 因此，不要覆盖/重置角色的文档集
         doc_set_ids: list[int] | None = None
         if doc_sets:
             doc_set_ids = [doc_set.id for doc_set in doc_sets]
@@ -145,5 +176,16 @@ def load_chat_yamls(
     prompt_yaml: str = PROMPTS_YAML,
     personas_yaml: str = PERSONAS_YAML,
 ) -> None:
+    """
+    统一加载提示词和角色配置的入口函数。
+
+    参数:
+        db_session: 数据库会话对象
+        prompt_yaml: 提示词配置文件路径，默认使用PROMPTS_YAML常量
+        personas_yaml: 角色配置文件路径，默认使用PERSONAS_YAML常量
+
+    返回:
+        None
+    """
     load_prompts_from_yaml(db_session, prompt_yaml)
     load_personas_from_yaml(db_session, personas_yaml)

@@ -1,3 +1,12 @@
+"""
+此文件包含了搜索上下文相关的工具函数。
+主要功能：
+1. 文档去重
+2. 相关性段落处理
+3. 文档转换工具
+4. 搜索结果处理
+"""
+
 from collections.abc import Sequence
 from typing import TypeVar
 
@@ -10,6 +19,7 @@ from onyx.context.search.models import SearchDoc
 from onyx.db.models import SearchDoc as DBSearchDoc
 
 
+# 定义用于不同搜索文档类型的泛型类型变量
 T = TypeVar(
     "T",
     InferenceSection,
@@ -29,6 +39,15 @@ TSection = TypeVar(
 
 
 def dedupe_documents(items: list[T]) -> tuple[list[T], list[int]]:
+    """
+    对文档列表进行去重处理。
+    
+    参数:
+        items: 需要去重的文档列表
+        
+    返回:
+        tuple: 包含去重后的文档列表和被删除项的索引列表
+    """
     seen_ids = set()
     deduped_items = []
     dropped_indices = []
@@ -49,6 +68,16 @@ def dedupe_documents(items: list[T]) -> tuple[list[T], list[int]]:
 def relevant_sections_to_indices(
     relevance_sections: list[SectionRelevancePiece] | None, items: list[TSection]
 ) -> list[int]:
+    """
+    将相关段落转换为索引列表。
+    
+    参数:
+        relevance_sections: 相关性段落列表
+        items: 文档段落列表
+        
+    返回:
+        list[int]: 相关段落在原列表中的索引列表
+    """
     if not relevance_sections:
         return []
 
@@ -80,6 +109,17 @@ def drop_llm_indices(
     search_docs: Sequence[DBSearchDoc | SavedSearchDoc],
     dropped_indices: list[int],
 ) -> list[int]:
+    """
+    根据删除的索引更新LLM索引列表。
+    
+    参数:
+        llm_indices: LLM模型生成的索引列表
+        search_docs: 搜索文档列表
+        dropped_indices: 需要删除的索引列表
+        
+    返回:
+        list[int]: 更新后的LLM索引列表
+    """
     llm_bools = [True if i in llm_indices else False for i in range(len(search_docs))]
     if dropped_indices:
         llm_bools = [
@@ -92,6 +132,16 @@ def inference_section_from_chunks(
     center_chunk: InferenceChunk,
     chunks: list[InferenceChunk],
 ) -> InferenceSection | None:
+    """
+    将多个文档块组合成一个推理段落。
+    
+    参数:
+        center_chunk: 中心文档块
+        chunks: 相关文档块列表
+        
+    返回:
+        InferenceSection | None: 组合后的推理段落，如果chunks为空则返回None
+    """
     if not chunks:
         return None
 
@@ -107,6 +157,15 @@ def inference_section_from_chunks(
 def chunks_or_sections_to_search_docs(
     items: Sequence[InferenceChunk | InferenceSection] | None,
 ) -> list[SearchDoc]:
+    """
+    将文档块或段落转换为搜索文档格式。
+    
+    参数:
+        items: 文档块或段落列表
+        
+    返回:
+        list[SearchDoc]: 转换后的搜索文档列表
+    """
     if not items:
         return []
 

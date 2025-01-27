@@ -1,3 +1,11 @@
+"""
+这个文件主要用于处理文档相关的数据库操作，包括:
+- 文档的增删改查
+- 文档与连接器/凭证对的关系管理
+- 文档的同步状态管理
+- 文档的访问控制
+"""
+
 import contextlib
 import time
 from collections.abc import Generator
@@ -39,23 +47,42 @@ logger = setup_logger()
 
 
 def check_docs_exist(db_session: Session) -> bool:
+    """
+    检查数据库中是否存在任何文档
+    
+    Args:
+        db_session: 数据库会话对象
+    Returns:
+        bool: 存在文档返回True，否则返回False
+    """
     stmt = select(exists(DbDocument))
     result = db_session.execute(stmt)
     return result.scalar() or False
 
 
 def count_documents_by_needs_sync(session: Session) -> int:
-    """Get the count of all documents where:
-    1. last_modified is newer than last_synced
+    """
+    获取需要同步的文档数量
+    
+    统计满足以下条件的文档数量:
+    1. last_modified比last_synced新
+    2. last_synced为空(从未同步过)
+    且文档与连接器/凭证对有关联关系
+    
+    原注释:
+    Get the count of all documents where:
+    1. last_modified is newer than last_synced 
     2. last_synced is null (meaning we've never synced)
     AND the document has a relationship with a connector/credential pair
-
-    TODO: The documents without a relationship with a connector/credential pair
-    should be cleaned up somehow eventually.
-
-    This function executes the query and returns the count of
-    documents matching the criteria."""
-
+    
+    中文翻译:
+    获取所有满足以下条件的文档数量:
+    1. last_modified 比 last_synced 新
+    2. last_synced 为空(表示从未同步)
+    且文档与连接器/凭证对有关联关系
+    
+    TODO: 没有与连接器/凭证对关系的文档最终应该被清理掉
+    """
     count = (
         session.query(func.count(DbDocument.id.distinct()))
         .select_from(DbDocument)
@@ -78,6 +105,15 @@ def count_documents_by_needs_sync(session: Session) -> int:
 def construct_document_select_for_connector_credential_pair_by_needs_sync(
     connector_id: int, credential_id: int
 ) -> Select:
+    """
+    构建SQL查询以获取指定连接器和凭证对应的需要同步的文档
+    
+    Args:
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+    Returns:
+        Select: SQL查询对象 
+    """
     initial_doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
         and_(
             DocumentByConnectorCredentialPair.connector_id == connector_id,
@@ -104,6 +140,15 @@ def construct_document_select_for_connector_credential_pair_by_needs_sync(
 def get_all_documents_needing_vespa_sync_for_cc_pair(
     db_session: Session, cc_pair_id: int
 ) -> list[DbDocument]:
+    """
+    获取指定连接器/凭证对中需要与Vespa同步的所有文档
+    
+    Args:
+        db_session: 数据库会话对象
+        cc_pair_id: 连接器/凭证对ID
+    Returns:
+        list[DbDocument]: 需要同步的文档列表
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id, db_session=db_session
     )
@@ -120,6 +165,15 @@ def get_all_documents_needing_vespa_sync_for_cc_pair(
 def construct_document_select_for_connector_credential_pair(
     connector_id: int, credential_id: int | None = None
 ) -> Select:
+    """
+    构建SQL查询以获取指定连接器和凭证对应的文档
+    
+    Args:
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+    Returns:
+        Select: SQL查询对象 
+    """
     initial_doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
         and_(
             DocumentByConnectorCredentialPair.connector_id == connector_id,
@@ -134,6 +188,15 @@ def get_documents_for_cc_pair(
     db_session: Session,
     cc_pair_id: int,
 ) -> list[DbDocument]:
+    """
+    获取指定连接器/凭证对的所有文档
+    
+    Args:
+        db_session: 数据库会话对象
+        cc_pair_id: 连接器/凭证对ID
+    Returns:
+        list[DbDocument]: 文档列表
+    """
     cc_pair = get_connector_credential_pair_from_id(
         cc_pair_id=cc_pair_id, db_session=db_session
     )
@@ -148,6 +211,17 @@ def get_documents_for_cc_pair(
 def get_document_ids_for_connector_credential_pair(
     db_session: Session, connector_id: int, credential_id: int, limit: int | None = None
 ) -> list[str]:
+    """
+    获取指定连接器/凭证对的文档ID列表
+    
+    Args:
+        db_session: 数据库会话对象
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        limit: 限制返回的文档数量
+    Returns:
+        list[str]: 文档ID列表
+    """
     doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
         and_(
             DocumentByConnectorCredentialPair.connector_id == connector_id,
@@ -160,6 +234,24 @@ def get_document_ids_for_connector_credential_pair(
 def get_documents_for_connector_credential_pair(
     db_session: Session, connector_id: int, credential_id: int, limit: int | None = None
 ) -> Sequence[DbDocument]:
+    """
+    获取指定连接器/凭证对的文档列表
+    
+    Args:
+        db_session: 数据库会话对象
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        limit: 限制返回的文档数量
+    Returns:
+        Sequence[DbDocument]: 文档列表
+        
+    原注释:
+    TODO: The documents without a relationship with a connector/credential pair
+    should be cleaned up somehow eventually.
+    
+    中文翻译:
+    TODO: 没有与连接器/凭证对关系的文档最终应该以某种方式清理掉
+    """
     initial_doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
         and_(
             DocumentByConnectorCredentialPair.connector_id == connector_id,
@@ -176,6 +268,15 @@ def get_documents_by_ids(
     db_session: Session,
     document_ids: list[str],
 ) -> list[DbDocument]:
+    """
+    根据文档ID列表获取文档
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    Returns:
+        list[DbDocument]: 文档列表
+    """
     stmt = select(DbDocument).where(DbDocument.id.in_(document_ids))
     documents = db_session.execute(stmt).scalars().all()
     return list(documents)
@@ -185,6 +286,15 @@ def get_document_connector_count(
     db_session: Session,
     document_id: str,
 ) -> int:
+    """
+    获取指定文档的连接器数量
+    
+    Args:
+        db_session: 数据库会话对象
+        document_id: 文档ID
+    Returns:
+        int: 连接器数量
+    """
     results = get_document_connector_counts(db_session, [document_id])
     if not results or len(results) == 0:
         return 0
@@ -196,6 +306,15 @@ def get_document_connector_counts(
     db_session: Session,
     document_ids: list[str],
 ) -> Sequence[tuple[str, int]]:
+    """
+    获取指定文档列表的连接器数量
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    Returns:
+        Sequence[tuple[str, int]]: 每个文档的连接器数量
+    """
     stmt = (
         select(
             DocumentByConnectorCredentialPair.id,
@@ -210,8 +329,15 @@ def get_document_connector_counts(
 def get_document_counts_for_cc_pairs(
     db_session: Session, cc_pair_identifiers: list[ConnectorCredentialPairIdentifier]
 ) -> Sequence[tuple[int, int, int]]:
-    """Returns a sequence of tuples of (connector_id, credential_id, document count)"""
-
+    """
+    获取指定连接器/凭证对的文档数量
+    
+    Args:
+        db_session: 数据库会话对象
+        cc_pair_identifiers: 连接器/凭证对标识符列表
+    Returns:
+        Sequence[tuple[int, int, int]]: 每个连接器/凭证对的文档数量
+    """
     # Prepare a list of (connector_id, credential_id) tuples
     cc_ids = [(x.connector_id, x.credential_id) for x in cc_pair_identifiers]
 
@@ -240,14 +366,16 @@ def get_access_info_for_document(
     db_session: Session,
     document_id: str,
 ) -> tuple[str, list[str | None], bool] | None:
-    """Gets access info for a single document by calling the get_access_info_for_documents function
-    and passing a list with a single document ID.
+    """
+    获取单个文档的访问信息
+    
+    通过调用get_access_info_for_documents函数并传递一个包含单个文档ID的列表来获取访问信息。
+    
     Args:
-        db_session (Session): The database session to use.
-        document_id (str): The document ID to fetch access info for.
+        db_session: 数据库会话对象
+        document_id: 文档ID
     Returns:
-        Optional[Tuple[str, List[str | None], bool]]: A tuple containing the document ID, a list of user emails,
-        and a boolean indicating if the document is globally public, or None if no results are found.
+        Optional[Tuple[str, List[str | None], bool]]: 包含文档ID、用户邮箱列表和文档是否公开的元组，或None
     """
     results = get_access_info_for_documents(db_session, [document_id])
     if not results:
@@ -260,15 +388,18 @@ def get_access_info_for_documents(
     db_session: Session,
     document_ids: list[str],
 ) -> Sequence[tuple[str, list[str | None], bool]]:
-    """Gets back all relevant access info for the given documents. This includes
-    the user_ids for cc pairs that the document is associated with + whether any
-    of the associated cc pairs are intending to make the document globally public.
-    Returns the list where each element contains:
-    - Document ID (which is also the ID of the DocumentByConnectorCredentialPair)
-    - List of emails of Onyx users with direct access to the doc (includes a "None" element if
-      the connector was set up by an admin when auth was off
-    - bool for whether the document is public (the document later can also be marked public by
-      automatic permission sync step)
+    """
+    获取指定文档的访问信息
+    
+    获取给定文档的所有相关访问信息，包括:
+    - 与文档关联的cc对的用户ID
+    - 任何关联的cc对是否打算使文档公开
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    Returns:
+        Sequence[tuple[str, list[str | None], bool]]: 每个文档的访问信息
     """
     stmt = select(
         DocumentByConnectorCredentialPair.id,
@@ -312,9 +443,17 @@ def upsert_documents(
     document_metadata_batch: list[DocumentMetadata],
     initial_boost: int = DEFAULT_BOOST,
 ) -> None:
-    """NOTE: this function is Postgres specific. Not all DBs support the ON CONFLICT clause.
-    Also note, this function should not be used for updating documents, only creating and
-    ensuring that it exists. It IGNORES the doc_updated_at field"""
+    """
+    插入或更新文档
+    
+    注意: 这个函数是Postgres特定的。并非所有数据库都支持ON CONFLICT子句。
+    此外，注意这个函数不应该用于更新文档，只用于创建和确保文档存在。它忽略doc_updated_at字段。
+    
+    Args:
+        db_session: 数据库会话对象
+        document_metadata_batch: 文档元数据列表
+        initial_boost: 初始boost值
+    """
     seen_documents: dict[str, DocumentMetadata] = {}
     for document_metadata in document_metadata_batch:
         doc_id = document_metadata.document_id
@@ -366,7 +505,24 @@ def upsert_documents(
 def upsert_document_by_connector_credential_pair(
     db_session: Session, connector_id: int, credential_id: int, document_ids: list[str]
 ) -> None:
-    """NOTE: this function is Postgres specific. Not all DBs support the ON CONFLICT clause."""
+    """
+    插入或更新文档与连接器/凭证对的关系
+    
+    注意: 这个函数是Postgres特定的。并非所有数据库都支持ON CONFLICT子句。
+    
+    原注释:
+    for now, there are no columns to update. If more metadata is added, then this
+    needs to change to an `on_conflict_do_update`
+    
+    中文翻译:
+    目前没有需要更新的列。如果添加了更多元数据，那么这需要改为`on_conflict_do_update`
+    
+    Args:
+        db_session: 数据库会话对象
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        document_ids: 文档ID列表
+    """
     if not document_ids:
         logger.info("`document_ids` is empty. Skipping.")
         return
@@ -394,6 +550,13 @@ def update_docs_updated_at__no_commit(
     ids_to_new_updated_at: dict[str, datetime],
     db_session: Session,
 ) -> None:
+    """
+    更新文档的更新时间(不提交事务)
+    
+    Args:
+        ids_to_new_updated_at: 文档ID到新更新时间的映射
+        db_session: 数据库会话对象
+    """
     doc_ids = list(ids_to_new_updated_at.keys())
     documents_to_update = (
         db_session.query(DbDocument).filter(DbDocument.id.in_(doc_ids)).all()
@@ -407,6 +570,13 @@ def update_docs_last_modified__no_commit(
     document_ids: list[str],
     db_session: Session,
 ) -> None:
+    """
+    更新文档的最后修改时间(不提交事务)
+    
+    Args:
+        document_ids: 文档ID列表
+        db_session: 数据库会话对象
+    """
     documents_to_update = (
         db_session.query(DbDocument).filter(DbDocument.id.in_(document_ids)).all()
     )
@@ -421,6 +591,14 @@ def update_docs_chunk_count__no_commit(
     doc_id_to_chunk_count: dict[str, int],
     db_session: Session,
 ) -> None:
+    """
+    更新文档的块计数(不提交事务)
+    
+    Args:
+        document_ids: 文档ID列表
+        doc_id_to_chunk_count: 文档ID到块计数的映射
+        db_session: 数据库会话对象
+    """
     documents_to_update = (
         db_session.query(DbDocument).filter(DbDocument.id.in_(document_ids)).all()
     )
@@ -432,9 +610,16 @@ def mark_document_as_modified(
     document_id: str,
     db_session: Session,
 ) -> None:
+    """
+    标记文档为已修改
+    
+    Args:
+        document_id: 文档ID
+        db_session: 数据库会话对象
+    """
     stmt = select(DbDocument).where(DbDocument.id == document_id)
     doc = db_session.scalar(stmt)
-    if doc is None:
+    if (doc is None):
         raise ValueError(f"No document with ID: {document_id}")
 
     # update last_synced
@@ -443,6 +628,13 @@ def mark_document_as_modified(
 
 
 def mark_document_as_synced(document_id: str, db_session: Session) -> None:
+    """
+    标记文档为已同步
+    
+    Args:
+        document_id: 文档ID
+        db_session: 数据库会话对象
+    """
     stmt = select(DbDocument).where(DbDocument.id == document_id)
     doc = db_session.scalar(stmt)
     if doc is None:
@@ -456,13 +648,24 @@ def mark_document_as_synced(document_id: str, db_session: Session) -> None:
 def delete_document_by_connector_credential_pair__no_commit(
     db_session: Session,
     document_id: str,
-    connector_credential_pair_identifier: ConnectorCredentialPairIdentifier
-    | None = None,
+    connector_credential_pair_identifier: ConnectorCredentialPairIdentifier | None = None,
 ) -> None:
-    """Deletes a single document by cc pair relationship entry.
+    """
+    删除单个文档与连接器/凭证对的关系(不提交事务)
+    
+    原注释:
     Foreign key rows are left in place.
     The implicit assumption is that the document itself still has other cc_pair
     references and needs to continue existing.
+    
+    中文翻译:
+    保留外键行。
+    隐含假设是该文档本身仍然有其他cc_pair引用并且需要继续存在。
+    
+    Args:
+        db_session: 数据库会话对象
+        document_id: 文档ID
+        connector_credential_pair_identifier: 连接器/凭证对标识符
     """
     delete_documents_by_connector_credential_pair__no_commit(
         db_session=db_session,
@@ -474,13 +677,26 @@ def delete_document_by_connector_credential_pair__no_commit(
 def delete_documents_by_connector_credential_pair__no_commit(
     db_session: Session,
     document_ids: list[str],
-    connector_credential_pair_identifier: ConnectorCredentialPairIdentifier
-    | None = None,
+    connector_credential_pair_identifier: ConnectorCredentialPairIdentifier | None = None,
 ) -> None:
-    """This deletes just the document by cc pair entries for a particular cc pair.
+    """
+    删除多个文档与连接器/凭证对的关系(不提交事务)
+    
+    原注释:
+    This deletes just the document by cc pair entries for a particular cc pair.
     Foreign key rows are left in place.
     The implicit assumption is that the document itself still has other cc_pair
     references and needs to continue existing.
+    
+    中文翻译:
+    这只删除特定cc对的文档与cc对的关联条目。
+    保留外键行。
+    隐含假设是该文档本身仍然有其他cc_pair引用并且需要继续存在。
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+        connector_credential_pair_identifier: 连接器/凭证对标识符
     """
     stmt = delete(DocumentByConnectorCredentialPair).where(
         DocumentByConnectorCredentialPair.id.in_(document_ids)
@@ -498,13 +714,26 @@ def delete_documents_by_connector_credential_pair__no_commit(
 
 
 def delete_documents__no_commit(db_session: Session, document_ids: list[str]) -> None:
+    """
+    删除文档(不提交事务)
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    """
     db_session.execute(delete(DbDocument).where(DbDocument.id.in_(document_ids)))
 
 
 def delete_documents_complete__no_commit(
     db_session: Session, document_ids: list[str]
 ) -> None:
-    """This completely deletes the documents from the db, including all foreign key relationships"""
+    """
+    完全删除文档，包括所有外键关系(不提交事务)
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    """
     delete_documents_by_connector_credential_pair__no_commit(db_session, document_ids)
     delete_document_feedback_for_documents__no_commit(
         document_ids=document_ids, db_session=db_session
@@ -516,13 +745,16 @@ def delete_documents_complete__no_commit(
 
 
 def acquire_document_locks(db_session: Session, document_ids: list[str]) -> bool:
-    """Acquire locks for the specified documents. Ideally this shouldn't be
-    called with large list of document_ids (an exception could be made if the
-    length of holding the lock is very short).
-
-    Will simply raise an exception if any of the documents are already locked.
-    This prevents deadlocks (assuming that the caller passes in all required
-    document IDs in a single call).
+    """
+    获取指定文档的锁。理想情况下，不应使用大列表调用此函数(除非持锁时间非常短)。
+    
+    如果任何文档已被锁定，将引发异常。这可以防止死锁(假设调用者在单次调用中传递所有必需的文档ID)。
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+    Returns:
+        bool: 成功获取锁返回True，否则返回False
     """
     stmt = (
         select(DbDocument.id)
@@ -548,16 +780,19 @@ _LOCK_RETRY_DELAY = 10
 def prepare_to_modify_documents(
     db_session: Session, document_ids: list[str], retry_delay: int = _LOCK_RETRY_DELAY
 ) -> Generator[TransactionalContext, None, None]:
-    """Try and acquire locks for the documents to prevent other jobs from
-    modifying them at the same time (e.g. avoid race conditions). This should be
-    called ahead of any modification to Vespa. Locks should be released by the
-    caller as soon as updates are complete by finishing the transaction.
-
-    NOTE: only one commit is allowed within the context manager returned by this function.
-    Multiple commits will result in a sqlalchemy.exc.InvalidRequestError.
-    NOTE: this function will commit any existing transaction.
     """
-
+    尝试获取文档的锁，以防止其他作业同时修改它们(例如，避免竞争条件)。
+    这应该在对Vespa进行任何修改之前调用。锁应在更新完成后由调用者通过完成事务释放。
+    
+    注意: 仅允许在此函数返回的上下文管理器内进行一次提交。
+    多次提交将导致sqlalchemy.exc.InvalidRequestError。
+    注意: 此函数将提交任何现有事务。
+    
+    Args:
+        db_session: 数据库会话对象
+        document_ids: 文档ID列表
+        retry_delay: 重试延迟时间
+    """
     db_session.commit()  # ensure that we're not in a transaction
 
     lock_acquired = False
@@ -587,6 +822,14 @@ def prepare_to_modify_documents(
 def get_ingestion_documents(
     db_session: Session,
 ) -> list[DbDocument]:
+    """
+    获取通过ingestion API导入的文档
+    
+    Args:
+        db_session: 数据库会话对象
+    Returns:
+        list[DbDocument]: 文档列表
+    """
     # TODO add the option to filter by DocumentSource
     stmt = select(DbDocument).where(DbDocument.from_ingestion_api.is_(True))
     documents = db_session.execute(stmt).scalars().all()
@@ -597,6 +840,15 @@ def get_documents_by_cc_pair(
     cc_pair_id: int,
     db_session: Session,
 ) -> list[DbDocument]:
+    """
+    获取指定连接器/凭证对的文档
+    
+    Args:
+        cc_pair_id: 连接器/凭证对ID
+        db_session: 数据库会话对象
+    Returns:
+        list[DbDocument]: 文档列表
+    """
     return (
         db_session.query(DbDocument)
         .join(
@@ -621,6 +873,15 @@ def get_document(
     document_id: str,
     db_session: Session,
 ) -> DbDocument | None:
+    """
+    获取指定ID的文档
+    
+    Args:
+        document_id: 文档ID
+        db_session: 数据库会话对象
+    Returns:
+        Optional[DbDocument]: 文档对象或None
+    """
     stmt = select(DbDocument).where(DbDocument.id == document_id)
     doc: DbDocument | None = db_session.execute(stmt).scalar_one_or_none()
     return doc
@@ -631,9 +892,17 @@ def fetch_chunk_counts_for_documents(
     db_session: Session,
 ) -> list[tuple[str, int | None]]:
     """
-    Return a list of (document_id, chunk_count) tuples.
-    Note: chunk_count might be None if not set in DB,
-    so we declare it as Optional[int].
+    获取文档的块计数
+    
+    返回一个包含(document_id, chunk_count)元组的列表。
+    注意: 如果在数据库中未设置chunk_count，则chunk_count可能为None，
+    因此我们将其声明为Optional[int]。
+    
+    Args:
+        document_ids: 文档ID列表
+        db_session: 数据库会话对象
+    Returns:
+        list[tuple[str, int | None]]: 每个文档的块计数
     """
     stmt = select(DbDocument.id, DbDocument.chunk_count).where(
         DbDocument.id.in_(document_ids)

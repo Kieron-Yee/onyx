@@ -1,3 +1,12 @@
+"""
+这个文件是聊天消息处理的核心模块,主要功能包括:
+1. 处理和流式输出聊天消息
+2. 管理聊天会话和消息链
+3. 处理文档搜索和引用
+4. 集成 LLM 模型生成回复
+5. 处理工具调用(搜索、图片生成等)
+"""
+
 import traceback
 from collections.abc import Callable
 from collections.abc import Iterator
@@ -134,8 +143,19 @@ logger = setup_logger()
 def _translate_citations(
     citations_list: list[CitationInfo], db_docs: list[DbSearchDoc]
 ) -> MessageSpecificCitations:
-    """Always cites the first instance of the document_id, assumes the db_docs
-    are sorted in the order displayed in the UI"""
+    """将引用信息转换为消息特定的引用格式
+    
+    Always cites the first instance of the document_id, assumes the db_docs 
+    are sorted in the order displayed in the UI
+    总是引用文档ID的第一个实例,假设db_docs按UI显示顺序排序
+    
+    Args:
+        citations_list: 引用信息列表
+        db_docs: 数据库文档列表
+    
+    Returns:
+        MessageSpecificCitations: 转换后的消息特定引用信息
+    """
     doc_id_to_saved_doc_id_map: dict[str, int] = {}
     for db_doc in db_docs:
         if db_doc.document_id not in doc_id_to_saved_doc_id_map:
@@ -157,6 +177,17 @@ def _handle_search_tool_response_summary(
     selected_search_docs: list[DbSearchDoc] | None,
     dedupe_docs: bool = False,
 ) -> tuple[QADocsResponse, list[DbSearchDoc], list[int] | None]:
+    """处理搜索工具的响应结果摘要
+    
+    Args:
+        packet: 工具响应包
+        db_session: 数据库会话
+        selected_search_docs: 已选择的搜索文档列表
+        dedupe_docs: 是否去重文档
+        
+    Returns:
+        tuple: 包含QA文档响应、参考DB搜索文档列表、被丢弃的索引列表
+    """
     response_sumary = cast(SearchResponseSummary, packet.response)
 
     dropped_inds = None
@@ -197,6 +228,15 @@ def _handle_internet_search_tool_response_summary(
     packet: ToolResponse,
     db_session: Session,
 ) -> tuple[QADocsResponse, list[DbSearchDoc]]:
+    """处理互联网搜索工具的响应结果摘要
+    
+    Args:
+        packet: 工具响应包 
+        db_session: 数据库会话
+        
+    Returns:
+        tuple: 包含QA文档响应和参考DB搜索文档列表
+    """
     internet_search_response = cast(InternetSearchResponse, packet.response)
     server_search_docs = internet_search_response_to_search_docs(
         internet_search_response
@@ -227,6 +267,15 @@ def _handle_internet_search_tool_response_summary(
 def _get_force_search_settings(
     new_msg_req: CreateChatMessageRequest, tools: list[Tool]
 ) -> ForceUseTool:
+    """获取强制搜索设置
+    
+    Args:
+        new_msg_req: 创建消息请求
+        tools: 可用工具列表
+        
+    Returns:
+        ForceUseTool: 强制使用工具的设置
+    """
     internet_search_available = any(
         isinstance(tool, InternetSearchTool) for tool in tools
     )
@@ -234,10 +283,12 @@ def _get_force_search_settings(
 
     if not internet_search_available and not search_tool_available:
         # Does not matter much which tool is set here as force is false and neither tool is available
+        # 这里设置哪个工具并不重要,因为force是false且没有工具可用
         return ForceUseTool(force_use=False, tool_name=SearchTool._NAME)
 
     tool_name = SearchTool._NAME if search_tool_available else InternetSearchTool._NAME
     # Currently, the internet search tool does not support query override
+    # 当前,互联网搜索工具不支持查询覆盖
     args = (
         {"query": new_msg_req.query_override}
         if new_msg_req.query_override and tool_name == SearchTool._NAME
@@ -246,6 +297,7 @@ def _get_force_search_settings(
 
     if new_msg_req.file_descriptors:
         # If user has uploaded files they're using, don't run any of the search tools
+        # 如果用户上传了他们正在使用的文件,不要运行任何搜索工具
         return ForceUseTool(force_use=False, tool_name=tool_name)
 
     should_force_search = any(
@@ -260,6 +312,7 @@ def _get_force_search_settings(
 
     if should_force_search:
         # If we are using selected docs, just put something here so the Tool doesn't need to build its own args via an LLM call
+        # 如果我们使用选定的文档,只需在此处放置一些内容,这样工具就不需要通过LLM调用来构建自己的参数
         args = {"query": new_msg_req.message} if new_msg_req.search_doc_ids else args
         return ForceUseTool(force_use=True, tool_name=tool_name, args=args)
 
@@ -303,18 +356,36 @@ def stream_chat_message_objects(
     bypass_acl: bool = False,
     include_contexts: bool = False,
 ) -> ChatPacketStream:
-    """Streams in order:
-    1. [conditional] Retrieved documents if a search needs to be run
-    2. [conditional] LLM selected chunk indices if LLM chunk filtering is turned on
-    3. [always] A set of streamed LLM tokens or an error anywhere along the line if something fails
-    4. [always] Details on the final AI response message that is created
+    """流式输出聊天消息对象
+    
+    按以下顺序流式输出:
+    1. [条件性] 如果需要进行搜索,则返回检索到的文档
+    2. [条件性] 如果启用了LLM内容过滤,则返回由LLM选择的chunk索引
+    3. [必然] 流式输出LLM生成的token,如果过程中发生错误则返回错误信息
+    4. [必然] 返回最终AI响应消息的详细信息
+
+    Args:
+        new_msg_req: 创建新消息的请求
+        user: 用户对象
+        db_session: 数据库会话
+        default_num_chunks: 默认chunk数量,用于将persona的num_chunks转换为LLM的token数
+        max_document_percentage: 文档使用的最大百分比
+        litellm_additional_headers: litellm的附加headers
+        custom_tool_additional_headers: 自定义工具的附加headers
+        is_connected: 检查连接状态的回调函数
+        enforce_chat_session_id_for_search_docs: 是否强制要求搜索文档有聊天会话ID
+        bypass_acl: 是否绕过访问控制
+        include_contexts: 是否包含上下文
+        
+    Returns:
+        ChatPacketStream: 聊天消息包的迭代器
     """
     tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
     use_existing_user_message = new_msg_req.use_existing_user_message
     existing_assistant_message_id = new_msg_req.existing_assistant_message_id
 
-    # Currently surrounding context is not supported for chat
-    # Chat is already token heavy and harder for the model to process plus it would roll history over much faster
+    # 当前不支持聊天的上下文
+    # 聊天已经很消耗token且模型处理较困难,而且会更快地滚动历史记录
     new_msg_req.chunks_above = 0
     new_msg_req.chunks_below = 0
 
@@ -334,14 +405,14 @@ def stream_chat_message_objects(
         retrieval_options = new_msg_req.retrieval_options
         alternate_assistant_id = new_msg_req.alternate_assistant_id
 
-        # permanent "log" store, used primarily for debugging
+        # 永久"日志"存储,主要用于调试
         long_term_logger = LongTermLogger(
             metadata={"user_id": str(user_id), "chat_session_id": str(chat_session_id)}
         )
 
         if alternate_assistant_id is not None:
-            # Allows users to specify a temporary persona (assistant) in the chat session
-            # this takes highest priority since it's user specified
+            # 允许用户在聊天会话中指定临时角色(助手)
+            # 这具有最高优先级,因为是用户指定的
             persona = get_persona_by_id(
                 alternate_assistant_id,
                 user=user,
@@ -349,8 +420,8 @@ def stream_chat_message_objects(
                 is_for_edit=False,
             )
         elif new_msg_req.persona_override_config:
-            # Certain endpoints allow users to specify arbitrary persona settings
-            # this should never conflict with the alternate_assistant_id
+            # 某些端点允许用户指定任意角色设置
+            # 这不应该与alternate_assistant_id冲突
             persona = persona = create_temporary_persona(
                 db_session=db_session,
                 persona_config=new_msg_req.persona_override_config,
@@ -387,8 +458,8 @@ def stream_chat_message_objects(
                 properties=None,
             )
 
-        # If a prompt override is specified via the API, use that with highest priority
-        # but for saving it, we are just mapping it to an existing prompt
+        # 如果通过API指定了提示覆盖,则使用它作为最高优先级
+        # 但为了保存,我们只是将其映射到现有提示
         prompt_id = new_msg_req.prompt_id
         if prompt_id is None and persona.prompts:
             prompt_id = sorted(persona.prompts, key=lambda x: x.id)[-1].id
@@ -424,7 +495,7 @@ def stream_chat_message_objects(
             primary_index_name=search_settings.index_name, secondary_index_name=None
         )
 
-        # Every chat Session begins with an empty root message
+        # 每个聊天会话都以一个空的根消息开始
         root_message = get_or_create_root_message(
             chat_session_id=chat_session_id, db_session=db_session
         )
@@ -448,8 +519,8 @@ def stream_chat_message_objects(
             )
 
         elif not use_existing_user_message:
-            # Create new message at the right place in the tree and update the parent's child pointer
-            # Don't commit yet until we verify the chat message chain
+            # 在树中正确位置创建新消息并更新父节点的子指针
+            # 在验证聊天消息链之前不要提交
             user_message = create_new_chat_message(
                 chat_session_id=chat_session_id,
                 parent_message=parent_message,
@@ -472,8 +543,7 @@ def stream_chat_message_objects(
                     "Be sure to update the chat pointers before calling this."
                 )
 
-            # NOTE: do not commit user message - it will be committed when the
-            # assistant message is successfully generated
+            # 注意:不要提交用户消息 - 它将在助手消息成功生成时提交
         else:
             # re-create linear history of messages
             final_msg, history_msgs = create_chat_chain(
@@ -543,8 +613,8 @@ def stream_chat_message_objects(
                 is_manually_selected_docs=True
             )
 
-            # In case the search doc is deleted, just don't include it
-            # though this should never happen
+            # 如果搜索文档被删除,就不包含它
+            # 虽然这种情况不应该发生
             db_search_docs_or_none = [
                 get_db_search_doc_by_id(doc_id=doc_id, db_session=db_session)
                 for doc_id in reference_doc_ids
@@ -711,7 +781,7 @@ def stream_chat_message_objects(
 
         reference_db_search_docs = None
         qa_docs_response = None
-        # any files to associate with the AI message e.g. dall-e generated images
+        # 任何与AI消息相关的文件,例如dall-e生成的图片
         ai_message_files = []
         dropped_indices = None
         tool_result = None
@@ -909,7 +979,7 @@ def stream_chat_message_objects(
         error_msg = str(e)
         logger.exception(error_msg)
 
-        # Frontend will erase whatever answer and show this instead
+        # 前端将擦除任何答案并显示这个
         yield StreamingError(error="Failed to parse LLM output")
 
 
@@ -921,6 +991,20 @@ def stream_chat_message(
     custom_tool_additional_headers: dict[str, str] | None = None,
     is_connected: Callable[[], bool] | None = None,
 ) -> Iterator[str]:
+    """流式输出聊天消息
+    
+    将聊天消息对象转换为JSON字符串格式流式输出
+    
+    Args:
+        new_msg_req: 创建新消息的请求
+        user: 用户对象
+        litellm_additional_headers: litellm的附加headers
+        custom_tool_additional_headers: 自定义工具的附加headers
+        is_connected: 检查连接状态的回调函数
+        
+    Returns:
+        Iterator[str]: JSON字符串迭代器
+    """
     with get_session_context_manager() as db_session:
         objects = stream_chat_message_objects(
             new_msg_req=new_msg_req,
@@ -938,6 +1022,16 @@ def stream_chat_message(
 def gather_stream_for_slack(
     packets: ChatPacketStream,
 ) -> ChatOnyxBotResponse:
+    """收集流式数据用于Slack响应
+    
+    将流式输出的聊天消息包整合为Slack机器人可用的响应格式
+    
+    Args:
+        packets: 聊天消息包流
+        
+    Returns:
+        ChatOnyxBotResponse: Slack机器人响应对象
+    """
     response = ChatOnyxBotResponse()
 
     answer = ""

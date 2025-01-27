@@ -1,3 +1,11 @@
+"""
+这个模块提供了并行执行函数的工具。
+主要功能包括：
+1. 使用线程池并行执行多个函数
+2. 支持带参数的函数调用
+3. 提供异常处理机制
+"""
+
 import uuid
 from collections.abc import Callable
 from concurrent.futures import as_completed
@@ -19,15 +27,15 @@ def run_functions_tuples_in_parallel(
     max_workers: int | None = None,
 ) -> list[Any]:
     """
-    Executes multiple functions in parallel and returns a list of the results for each function.
+    并行执行多个函数并返回每个函数的结果列表。
 
-    Args:
-        functions_with_args: List of tuples each containing the function callable and a tuple of arguments.
-        allow_failures: if set to True, then the function result will just be None
-        max_workers: Max number of worker threads
+    参数:
+        functions_with_args: 函数和参数的元组列表，每个元组包含可调用的函数和参数元组。
+        allow_failures: 如果设置为True，则函数执行失败时结果将为None
+        max_workers: 最大工作线程数
 
-    Returns:
-        dict: A dictionary mapping function names to their results or error messages.
+    返回:
+        字典：将函数名映射到其结果或错误消息的字典。
     """
     workers = (
         min(max_workers, len(functions_with_args))
@@ -62,19 +70,32 @@ def run_functions_tuples_in_parallel(
 
 class FunctionCall(Generic[R]):
     """
-    Container for run_functions_in_parallel, fetch the results from the output of
-    run_functions_in_parallel via the FunctionCall.result_id.
+    用于run_functions_in_parallel的容器，通过FunctionCall.result_id从run_functions_in_parallel的输出中获取结果。
     """
 
     def __init__(
         self, func: Callable[..., R], args: tuple = (), kwargs: dict | None = None
     ):
+        """
+        初始化FunctionCall实例
+        
+        参数:
+            func: 要执行的函数
+            args: 位置参数
+            kwargs: 关键字参数
+        """
         self.func = func
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.result_id = str(uuid.uuid4())
 
     def execute(self) -> R:
+        """
+        执行函数调用
+        
+        返回:
+            函数执行的结果
+        """
         return self.func(*self.args, **self.kwargs)
 
 
@@ -83,8 +104,14 @@ def run_functions_in_parallel(
     allow_failures: bool = False,
 ) -> dict[str, Any]:
     """
-    Executes a list of FunctionCalls in parallel and stores the results in a dictionary where the keys
-    are the result_id of the FunctionCall and the values are the results of the call.
+    并行执行FunctionCall列表，并将结果存储在字典中，其中键是FunctionCall的result_id，值是调用的结果。
+
+    参数:
+        function_calls: FunctionCall对象列表
+        allow_failures: 是否允许执行失败，如果为True，失败的调用结果将为None
+
+    返回:
+        包含执行结果的字典，键为result_id，值为对应的执行结果
     """
     results = {}
 

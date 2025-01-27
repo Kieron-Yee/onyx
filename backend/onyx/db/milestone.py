@@ -1,3 +1,8 @@
+"""
+此文件负责处理里程碑相关的数据库操作。
+主要包含里程碑的创建、更新和检查等功能，用于追踪用户使用助手的情况。
+"""
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -8,7 +13,9 @@ from onyx.db.models import Milestone
 from onyx.db.models import User
 
 
+# 用户助手使用记录的前缀
 USER_ASSISTANT_PREFIX = "user_assistants_used_"
+# 多助手使用标记
 MULTI_ASSISTANT_USED = "multi_assistant_used"
 
 
@@ -17,6 +24,11 @@ def create_milestone(
     event_type: MilestoneRecordType,
     db_session: Session,
 ) -> Milestone:
+    """
+    创建新的里程碑记录。
+    
+    此函数用于在数据库中创建一个新的里程碑事件，记录用户的特定行为或成就。
+    """
     milestone = Milestone(
         event_type=event_type,
         user_id=user.id if user else None,
@@ -30,6 +42,12 @@ def create_milestone(
 def create_milestone_if_not_exists(
     user: User | None, event_type: MilestoneRecordType, db_session: Session
 ) -> tuple[Milestone, bool]:
+    """
+    检查并创建里程碑记录。
+    
+    此函数首先检查特定类型的里程碑是否存在，如果不存在则创建新的里程碑。
+    返回值中的布尔值表示是否新创建了里程碑。
+    """
     # Check if it exists
     milestone = db_session.execute(
         select(Milestone).where(Milestone.event_type == event_type)
@@ -58,6 +76,12 @@ def update_user_assistant_milestone(
     assistant_id: int,
     db_session: Session,
 ) -> None:
+    """
+    更新用户使用助手的里程碑记录。
+    
+    此函数用于记录用户使用特定助手的情况，并将这些使用记录存储在里程碑的事件追踪器中。
+    如果用户已经达到使用多个助手的里程碑，则不再继续追踪。
+    """
     event_tracker = milestone.event_tracker
     if event_tracker is None:
         milestone.event_tracker = event_tracker = {}
@@ -81,7 +105,14 @@ def check_multi_assistant_milestone(
     milestone: Milestone,
     db_session: Session,
 ) -> tuple[bool, bool]:
-    """Returns if the milestone was hit and if it was just hit for the first time"""
+    """
+    检查用户是否达到使用多个助手的里程碑。
+    Returns if the milestone was hit and if it was just hit for the first time
+    返回值说明：是否达到里程碑以及是否是首次达到
+    
+    此函数用于检查用户是否使用了多个不同的助手，并在首次达到该里程碑时进行标记。
+    返回两个布尔值，分别表示是否达到里程碑和是否是首次达到。
+    """
     event_tracker = milestone.event_tracker
     if event_tracker is None:
         return False, False

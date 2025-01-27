@@ -1,3 +1,12 @@
+"""
+此文件用于管理连接器删除任务与Redis的交互。
+主要功能包括：
+1. 管理删除任务的状态追踪
+2. 生成和维护删除任务队列
+3. 处理任务删除的fence机制
+4. 提供任务进度查询和重置功能
+"""
+
 import time
 from datetime import datetime
 from typing import cast
@@ -19,19 +28,36 @@ from onyx.db.models import Document as DbDocument
 
 
 class RedisConnectorDeletePayload(BaseModel):
+    """
+    删除任务的负载数据模型
+    
+    属性:
+        num_tasks: 任务总数，可为空
+        submitted: 任务提交时间
+    """
     num_tasks: int | None
     submitted: datetime
 
 
 class RedisConnectorDelete:
     """Manages interactions with redis for deletion tasks. Should only be accessed
-    through RedisConnector."""
+    through RedisConnector.
+    管理删除任务与Redis的交互。只能通过RedisConnector访问。
+    """
 
-    PREFIX = "connectordeletion"
-    FENCE_PREFIX = f"{PREFIX}_fence"  # "connectordeletion_fence"
-    TASKSET_PREFIX = f"{PREFIX}_taskset"  # "connectordeletion_taskset"
+    PREFIX = "connectordeletion"  # 删除任务前缀
+    FENCE_PREFIX = f"{PREFIX}_fence"  # 栅栏前缀
+    TASKSET_PREFIX = f"{PREFIX}_taskset"  # 任务集前缀
 
     def __init__(self, tenant_id: str | None, id: int, redis: redis.Redis) -> None:
+        """
+        初始化Redis连接器删除实例
+        
+        参数:
+            tenant_id: 租户ID
+            id: 连接器ID
+            redis: Redis客户端实例
+        """
         self.tenant_id: str | None = tenant_id
         self.id = id
         self.redis = redis
@@ -40,30 +66,45 @@ class RedisConnectorDelete:
         self.taskset_key = f"{self.TASKSET_PREFIX}_{id}"
 
     def taskset_clear(self) -> None:
+        """清除任务集合"""
         self.redis.delete(self.taskset_key)
 
     def get_remaining(self) -> int:
-        # todo: move into fence
+        """
+        获取剩余任务数量
+        
+        返回:
+            剩余任务的数量
+        """
         remaining = cast(int, self.redis.scard(self.taskset_key))
         return remaining
 
     @property
     def fenced(self) -> bool:
+        """
+        检查是否存在栅栏
+        
+        返回:
+            如果存在栅栏返回True，否则返回False
+        """
         if self.redis.exists(self.fence_key):
             return True
-
         return False
 
     @property
     def payload(self) -> RedisConnectorDeletePayload | None:
-        # read related data and evaluate/print task progress
+        """
+        获取任务负载数据
+        
+        返回:
+            任务负载数据对象，如果不存在则返回None
+        """
         fence_bytes = cast(bytes, self.redis.get(self.fence_key))
         if fence_bytes is None:
             return None
 
         fence_str = fence_bytes.decode("utf-8")
         payload = RedisConnectorDeletePayload.model_validate_json(cast(str, fence_str))
-
         return payload
 
     def set_fence(self, payload: RedisConnectorDeletePayload | None) -> None:
@@ -86,8 +127,17 @@ class RedisConnectorDelete:
         db_session: Session,
         lock: RedisLock,
     ) -> int | None:
-        """Returns None if the cc_pair doesn't exist.
-        Otherwise, returns an int with the number of generated tasks."""
+        """
+        生成删除任务
+        
+        参数:
+            celery_app: Celery应用实例
+            db_session: 数据库会话
+            lock: Redis锁实例
+        
+        返回:
+            如果连接器凭证对不存在返回None，否则返回生成的任务数量
+        """
         last_lock_time = time.monotonic()
 
         async_results = []
@@ -132,18 +182,32 @@ class RedisConnectorDelete:
         return len(async_results)
 
     def reset(self) -> None:
+        """重置所有相关的Redis数据"""
         self.redis.delete(self.taskset_key)
         self.redis.delete(self.fence_key)
 
     @staticmethod
     def remove_from_taskset(id: int, task_id: str, r: redis.Redis) -> None:
+        """
+        从任务集合中移除指定任务
+        
+        参数:
+            id: 连接器ID
+            task_id: 任务ID
+            r: Redis客户端实例
+        """
         taskset_key = f"{RedisConnectorDelete.TASKSET_PREFIX}_{id}"
         r.srem(taskset_key, task_id)
         return
 
     @staticmethod
     def reset_all(r: redis.Redis) -> None:
-        """Deletes all redis values for all connectors"""
+        """
+        删除所有连接器的Redis数据
+        
+        参数:
+            r: Redis客户端实例
+        """
         for key in r.scan_iter(RedisConnectorDelete.TASKSET_PREFIX + "*"):
             r.delete(key)
 

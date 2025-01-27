@@ -1,3 +1,12 @@
+"""
+这个模块实现了AI助手(Persona)相关的API接口。
+主要功能包括:
+- AI助手的创建、更新、删除和查询
+- AI助手类别的管理
+- AI助手的共享和权限控制
+- AI助手的提示语生成
+"""
+
 import uuid
 from uuid import UUID
 
@@ -63,10 +72,22 @@ basic_router = APIRouter(prefix="/persona")
 
 
 class IsVisibleRequest(BaseModel):
+    """
+    控制AI助手可见性的请求模型
+    
+    属性:
+        is_visible (bool): 是否可见
+    """
     is_visible: bool
 
 
 class IsPublicRequest(BaseModel):
+    """
+    控制AI助手公开状态的请求模型
+    
+    属性:
+        is_public (bool): 是否公开
+    """
     is_public: bool
 
 
@@ -77,6 +98,15 @@ def patch_persona_visibility(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新AI助手的可见性状态
+    
+    参数:
+        persona_id: AI助手ID
+        is_visible_request: 可见性请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+    """
     update_persona_visibility(
         persona_id=persona_id,
         is_visible=is_visible_request.is_visible,
@@ -92,6 +122,18 @@ def patch_user_presona_public_status(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新AI助手的公开状态
+    
+    参数:
+        persona_id: AI助手ID
+        is_public_request: 公开状态请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    异常:
+        HTTPException: 更新公开状态失败时抛出403错误
+    """
     try:
         update_persona_public_status(
             persona_id=persona_id,
@@ -110,6 +152,14 @@ def patch_persona_display_priority(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新所有AI助手的显示优先级
+    
+    参数:
+        display_priority_request: 显示优先级请求对象
+        _: 当前用户对象
+        db_session: 数据库会话
+    """
     update_all_personas_display_priority(
         display_priority_map=display_priority_request.display_priority_map,
         db_session=db_session,
@@ -123,6 +173,18 @@ def list_personas_admin(
     include_deleted: bool = False,
     get_editable: bool = Query(False, description="If true, return editable personas"),
 ) -> list[PersonaSnapshot]:
+    """
+    获取所有AI助手的列表（管理员接口）
+    
+    参数:
+        user: 当前用户对象
+        db_session: 数据库会话
+        include_deleted: 是否包含已删除的AI助手
+        get_editable: 是否只获取可编辑的AI助手
+        
+    返回:
+        list[PersonaSnapshot]: AI助手快照列表
+    """
     return [
         PersonaSnapshot.from_model(persona)
         for persona in get_personas(
@@ -141,6 +203,14 @@ def undelete_persona(
     user: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    恢复已删除的AI助手
+    
+    参数:
+        persona_id: AI助手ID
+        user: 当前用户对象
+        db_session: 数据库会话
+    """
     mark_persona_as_not_deleted(
         persona_id=persona_id,
         user=user,
@@ -155,6 +225,17 @@ def upload_file(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_user),
 ) -> dict[str, str]:
+    """
+    上传AI助手的头像图片
+    
+    参数:
+        file: 上传的文件对象
+        db_session: 数据库会话
+        _: 当前用户对象
+        
+    返回:
+        dict[str, str]: 文件ID字典
+    """
     file_store = get_default_file_store(db_session)
     file_type = ChatFileType.IMAGE
     file_id = str(uuid.uuid4())
@@ -178,6 +259,18 @@ def create_persona(
     db_session: Session = Depends(get_session),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> PersonaSnapshot:
+    """
+    创建新的AI助手
+    
+    参数:
+        create_persona_request: 创建AI助手请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+        tenant_id: 当前租户ID
+        
+    返回:
+        PersonaSnapshot: 创建的AI助手快照
+    """
     persona_snapshot = create_update_persona(
         persona_id=None,
         create_persona_request=create_persona_request,
@@ -206,6 +299,18 @@ def update_persona(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> PersonaSnapshot:
+    """
+    更新AI助手的信息
+    
+    参数:
+        persona_id: AI助手ID
+        update_persona_request: 更新AI助手请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        PersonaSnapshot: 更新后的AI助手快照
+    """
     return create_update_persona(
         persona_id=persona_id,
         create_persona_request=update_persona_request,
@@ -215,6 +320,13 @@ def update_persona(
 
 
 class PersonaCategoryPatchRequest(BaseModel):
+    """
+    更新AI助手类别的请求模型
+    
+    属性:
+        category_description (str): 类别描述
+        category_name (str): 类别名称
+    """
     category_description: str
     category_name: str
 
@@ -224,6 +336,16 @@ def get_categories(
     db: Session = Depends(get_session),
     _: User | None = Depends(current_user),
 ) -> list[PersonaCategoryResponse]:
+    """
+    获取所有AI助手类别
+    
+    参数:
+        db: 数据库会话
+        _: 当前用户对象
+        
+    返回:
+        list[PersonaCategoryResponse]: AI助手类别响应列表
+    """
     return [
         PersonaCategoryResponse.from_model(category)
         for category in get_assistant_categories(db_session=db)
@@ -236,7 +358,17 @@ def create_category(
     db: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> PersonaCategoryResponse:
-    """Create a new assistant category"""
+    """
+    创建新的AI助手类别
+    
+    参数:
+        category: 创建类别请求对象
+        db: 数据库会话
+        _: 当前用户对象
+        
+    返回:
+        PersonaCategoryResponse: 创建的AI助手类别响应
+    """
     category_model = create_assistant_category(
         name=category.name, description=category.description, db_session=db
     )
@@ -250,6 +382,15 @@ def patch_persona_category(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新AI助手类别信息
+    
+    参数:
+        category_id: 类别ID
+        persona_category_patch_request: 更新类别请求对象
+        _: 当前用户对象
+        db_session: 数据库会话
+    """
     update_persona_category(
         category_id=category_id,
         category_description=persona_category_patch_request.category_description,
@@ -264,10 +405,24 @@ def delete_category(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除AI助手类别
+    
+    参数:
+        category_id: 类别ID
+        _: 当前用户对象
+        db_session: 数据库会话
+    """
     delete_persona_category(category_id=category_id, db_session=db_session)
 
 
 class PersonaShareRequest(BaseModel):
+    """
+    共享AI助手的请求模型
+    
+    属性:
+        user_ids (list[UUID]): 用户ID列表
+    """
     user_ids: list[UUID]
 
 
@@ -279,6 +434,15 @@ def share_persona(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    共享AI助手给指定用户
+    
+    参数:
+        persona_id: AI助手ID
+        persona_share_request: 共享请求对象
+        user: 当前用户对象
+        db_session: 数据库会话
+    """
     update_persona_shared_users(
         persona_id=persona_id,
         user_ids=persona_share_request.user_ids,
@@ -305,6 +469,14 @@ def delete_persona(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除AI助手
+    
+    参数:
+        persona_id: AI助手ID
+        user: 当前用户对象
+        db_session: 数据库会话
+    """
     mark_persona_as_deleted(
         persona_id=persona_id,
         user=user,
@@ -318,6 +490,16 @@ def get_image_generation_tool(
     | None = Depends(current_user),  # User param not used but kept for consistency
     db_session: Session = Depends(get_session),
 ) -> ImageGenerationToolStatus:  # Use bool instead of str for boolean values
+    """
+    获取图像生成工具的状态
+    
+    参数:
+        _: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        ImageGenerationToolStatus: 图像生成工具状态
+    """
     is_available = is_image_generation_available(db_session=db_session)
     return ImageGenerationToolStatus(is_available=is_available)
 
@@ -329,6 +511,18 @@ def list_personas(
     include_deleted: bool = False,
     persona_ids: list[int] = Query(None),
 ) -> list[PersonaSnapshot]:
+    """
+    获取所有AI助手的列表
+    
+    参数:
+        user: 当前用户对象
+        db_session: 数据库会话
+        include_deleted: 是否包含已删除的AI助手
+        persona_ids: 指定的AI助手ID列表
+        
+    返回:
+        list[PersonaSnapshot]: AI助手快照列表
+    """
     personas = get_personas(
         user=user,
         include_deleted=include_deleted,
@@ -359,6 +553,17 @@ def get_persona(
     user: User | None = Depends(current_limited_user),
     db_session: Session = Depends(get_session),
 ) -> PersonaSnapshot:
+    """
+    获取指定ID的AI助手信息
+    
+    参数:
+        persona_id: AI助手ID
+        user: 当前用户对象
+        db_session: 数据库会话
+        
+    返回:
+        PersonaSnapshot: AI助手快照
+    """
     return PersonaSnapshot.from_model(
         get_persona_by_id(
             persona_id=persona_id,
@@ -376,6 +581,18 @@ def build_final_template_prompt(
     retrieval_disabled: bool = False,
     _: User | None = Depends(current_user),
 ) -> PromptTemplateResponse:
+    """
+    构建最终的提示模板
+    
+    参数:
+        system_prompt: 系统提示语
+        task_prompt: 任务提示语
+        retrieval_disabled: 是否禁用检索
+        _: 当前用户对象
+        
+    返回:
+        PromptTemplateResponse: 提示模板响应
+    """
     return PromptTemplateResponse(
         final_prompt_template=build_dummy_prompt(
             system_prompt=system_prompt,
@@ -391,9 +608,24 @@ def build_assistant_prompts(
     db_session: Session = Depends(get_session),
     user: User | None = Depends(current_user),
 ) -> list[StarterMessage]:
+    """
+    生成AI助手的初始对话提示
+    
+    参数:
+        generate_persona_prompt_request: 生成提示语请求对象
+        db_session: 数据库会话
+        user: 当前用户对象
+        
+    返回:
+        list[StarterMessage]: 生成的初始对话提示列表
+        
+    异常:
+        HTTPException: 生成提示语失败时抛出500错误
+    """
     try:
         logger.info(
-            "Generating starter messages for user: %s", user.id if user else "Anonymous"
+            "Generating starter messages for user: %s", # 正在为用户生成初始消息
+            user.id if user else "Anonymous"
         )
         return generate_starter_messages(
             name=generate_persona_prompt_request.name,
@@ -404,5 +636,5 @@ def build_assistant_prompts(
             user=user,
         )
     except Exception as e:
-        logger.exception("Failed to generate starter messages")
+        logger.exception("Failed to generate starter messages") # 生成初始消息失败
         raise HTTPException(status_code=500, detail=str(e))

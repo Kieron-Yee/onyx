@@ -1,4 +1,13 @@
+"""
+此文件主要用于处理聊天过程中的引用内容流式处理。
+主要功能包括：
+- 从模型输出中提取答案和引用内容
+- 将引用内容与文档进行匹配
+- 处理流式输出的引用内容
+"""
+
 # THIS IS NO LONGER IN USE
+# 此文件已不再使用
 import math
 import re
 from collections.abc import Generator
@@ -27,7 +36,19 @@ answer_pattern = re.compile(r'{\s*"answer"\s*:\s*"', re.IGNORECASE)
 
 
 class OnyxQuote(BaseModel):
+    """
+    表示单个引用的模型类
+    
+    属性:
+        quote: str - 引用的具体内容
+        document_id: str - 引用来源文档的ID
+        link: str | None - 引用的链接
+        source_type: str - 引用来源的类型
+        semantic_identifier: str - 语义标识符
+        blurb: str - 引用的简短描述
+    """
     # This is during inference so everything is a string by this point
+    # 在推理阶段，所有内容都以字符串形式存储
     quote: str
     document_id: str
     link: str | None
@@ -37,12 +58,27 @@ class OnyxQuote(BaseModel):
 
 
 class OnyxQuotes(BaseModel):
+    """
+    包含多个引用的容器类
+    
+    属性:
+        quotes: list[OnyxQuote] - 引用列表
+    """
     quotes: list[OnyxQuote]
 
 
 def _extract_answer_quotes_freeform(
     answer_raw: str,
 ) -> tuple[Optional[str], Optional[list[str]]]:
+    """
+    从原始文本中提取答案和引用部分
+    
+    参数:
+        answer_raw: str - 原始的模型输出文本
+    
+    返回:
+        tuple[Optional[str], Optional[list[str]]] - (答案文本, 引用列表)
+    """
     """Splits the model output into an Answer and 0 or more Quote sections.
     Splits by the Quote pattern, if not exist then assume it's all answer and no quotes
     """
@@ -75,6 +111,15 @@ def _extract_answer_quotes_freeform(
 def _extract_answer_quotes_json(
     answer_dict: dict[str, str | list[str]]
 ) -> tuple[Optional[str], Optional[list[str]]]:
+    """
+    从JSON格式的字典中提取答案和引用
+    
+    参数:
+        answer_dict: dict - 包含答案和引用的字典
+        
+    返回:
+        tuple[Optional[str], Optional[list[str]]] - (答案文本, 引用列表)
+    """
     answer_dict = {k.lower(): v for k, v in answer_dict.items()}
     answer = str(answer_dict.get("answer"))
     quotes = answer_dict.get("quotes") or answer_dict.get("quote")
@@ -105,6 +150,19 @@ def match_quotes_to_docs(
     fuzzy_search: bool = False,
     prefix_only_length: int = 100,
 ) -> OnyxQuotes:
+    """
+    将引用内容与原始文档进行匹配
+    
+    参数:
+        quotes: list[str] - 引用列表
+        docs: list - 文档列表
+        max_error_percent: float - 允许的最大错误百分比
+        fuzzy_search: bool - 是否使用模糊匹配
+        prefix_only_length: int - 仅匹配前缀的长度
+        
+    返回:
+        OnyxQuotes - 匹配后的引用对象
+    """
     onyx_quotes: list[OnyxQuote] = []
     for quote in quotes:
         max_edits = math.ceil(float(len(quote)) * max_error_percent)
@@ -216,11 +274,31 @@ def _extract_quotes_from_completed_token_stream(
 
 
 class QuotesProcessor:
+    """
+    引用处理器类，用于处理流式输出中的引用内容
+    
+    属性:
+        context_docs: list[LlmDoc] - 上下文文档列表
+        is_json_prompt: bool - 是否为JSON格式的提示
+        found_answer_start: bool - 是否找到答案开始
+        found_answer_end: bool - 是否找到答案结束
+        hold_quote: str - 临时存储的引用内容
+        model_output: str - 模型输出内容
+        hold: str - 临时存储区
+    """
+    
     def __init__(
         self,
         context_docs: list[LlmDoc],
         is_json_prompt: bool = True,
     ):
+        """
+        初始化引用处理器
+        
+        参数:
+            context_docs: list[LlmDoc] - 上下文文档列表
+            is_json_prompt: bool - 是否为JSON格式的提示
+        """
         self.context_docs = context_docs
         self.is_json_prompt = is_json_prompt
 
@@ -233,7 +311,17 @@ class QuotesProcessor:
     def process_token(
         self, token: str | None
     ) -> Generator[OnyxAnswerPiece | OnyxQuotes, None, None]:
+        """
+        处理单个token，生成答案片段或引用
+        
+        参数:
+            token: str | None - 输入的token，None表示流结束
+            
+        返回:
+            Generator - 生成答案片段或引用对象
+        """
         # None -> end of stream
+        # None表示流结束
         if token is None:
             if self.model_output:
                 yield _extract_quotes_from_completed_token_stream(

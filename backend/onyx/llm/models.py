@@ -1,3 +1,8 @@
+"""
+这个文件定义了与语言模型交互相关的数据模型。
+主要包含了消息处理、类型转换等功能的实现。
+"""
+
 from typing import TYPE_CHECKING
 
 from langchain.schema.messages import AIMessage
@@ -16,18 +21,35 @@ if TYPE_CHECKING:
 
 
 class PreviousMessage(BaseModel):
-    """Simplified version of `ChatMessage`"""
+    """Simplified version of `ChatMessage`
+    `ChatMessage` 的简化版本，用于存储和处理聊天消息
+    """
 
+    # 消息内容
     message: str
+    # token数量
     token_count: int
+    # 消息类型
     message_type: MessageType
+    # 关联文件列表
     files: list[InMemoryChatFile]
+    # 工具调用结果
     tool_call: ToolCallFinalResult | None
 
     @classmethod
     def from_chat_message(
         cls, chat_message: "ChatMessage", available_files: list[InMemoryChatFile]
     ) -> "PreviousMessage":
+        """
+        从ChatMessage对象创建PreviousMessage实例
+        
+        参数:
+            chat_message: ChatMessage对象
+            available_files: 可用文件列表
+            
+        返回:
+            PreviousMessage实例
+        """
         message_file_ids = (
             [file["id"] for file in chat_message.files] if chat_message.files else []
         )
@@ -43,13 +65,20 @@ class PreviousMessage(BaseModel):
             tool_call=ToolCallFinalResult(
                 tool_name=chat_message.tool_call.tool_name,
                 tool_args=chat_message.tool_call.tool_arguments,
-                tool_result=chat_message.tool_call.tool_result,
+                tool_result=chat_message.tool_result,
             )
             if chat_message.tool_call
             else None,
         )
 
     def to_langchain_msg(self) -> BaseMessage:
+        """
+        将PreviousMessage转换为langchain消息对象
+        
+        返回:
+            BaseMessage: 根据消息类型返回对应的langchain消息对象
+            (HumanMessage/AIMessage/SystemMessage)
+        """
         content = build_content_with_imgs(self.message, self.files)
         if self.message_type == MessageType.USER:
             return HumanMessage(content=content)

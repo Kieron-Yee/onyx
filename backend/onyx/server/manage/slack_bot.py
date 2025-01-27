@@ -1,3 +1,11 @@
+"""
+此文件实现了Slack机器人管理的API路由功能。
+主要包含：
+- Slack频道配置的增删改查
+- Slack机器人的增删改查
+- 相关配置的验证和处理逻辑
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -38,6 +46,21 @@ def _form_channel_config(
     slack_channel_config_creation_request: SlackChannelConfigCreationRequest,
     current_slack_channel_config_id: int | None,
 ) -> ChannelConfig:
+    """
+    根据请求参数构建频道配置对象。
+
+    参数:
+        db_session: 数据库会话对象
+        slack_channel_config_creation_request: 频道配置创建请求对象
+        current_slack_channel_config_id: 当前频道配置ID，用于更新操作
+
+    返回:
+        ChannelConfig: 构建的频道配置对象
+
+    异常:
+        HTTPException: 当频道名称验证失败时抛出
+        ValueError: 当配置参数冲突时抛出
+    """
     raw_channel_name = slack_channel_config_creation_request.channel_name
     respond_tag_only = slack_channel_config_creation_request.respond_tag_only
     respond_member_group_list = (
@@ -100,6 +123,17 @@ def create_slack_channel_config(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> SlackChannelConfig:
+    """
+    创建新的Slack频道配置。
+
+    参数:
+        slack_channel_config_creation_request: 频道配置创建请求
+        db_session: 数据库会话
+        _: 当前管理员用户(用于权限验证)
+
+    返回:
+        SlackChannelConfig: 创建的频道配置对象
+    """
     channel_config = _form_channel_config(
         db_session=db_session,
         slack_channel_config_creation_request=slack_channel_config_creation_request,
@@ -135,6 +169,18 @@ def patch_slack_channel_config(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> SlackChannelConfig:
+    """
+    更新现有的Slack频道配置。
+
+    参数:
+        slack_channel_config_id: 要更新的频道配置ID
+        slack_channel_config_creation_request: 更新请求
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        SlackChannelConfig: 更新后的频道配置对象
+    """
     channel_config = _form_channel_config(
         db_session=db_session,
         slack_channel_config_creation_request=slack_channel_config_creation_request,
@@ -196,6 +242,14 @@ def delete_slack_channel_config(
     db_session: Session = Depends(get_session),
     user: User | None = Depends(current_admin_user),
 ) -> None:
+    """
+    删除指定的Slack频道配置。
+
+    参数:
+        slack_channel_config_id: 要删除的频道配置ID
+        db_session: 数据库会话
+        user: 当前管理员用户
+    """
     remove_slack_channel_config(
         db_session=db_session,
         slack_channel_config_id=slack_channel_config_id,
@@ -208,6 +262,16 @@ def list_slack_channel_configs(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> list[SlackChannelConfig]:
+    """
+    获取所有Slack频道配置列表。
+
+    参数:
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        list[SlackChannelConfig]: 频道配置对象列表
+    """
     slack_channel_config_models = fetch_slack_channel_configs(db_session=db_session)
     return [
         SlackChannelConfig.from_model(slack_channel_config_model)
@@ -222,6 +286,18 @@ def create_bot(
     _: User | None = Depends(current_admin_user),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> SlackBot:
+    """
+    创建新的Slack机器人。
+
+    参数:
+        slack_bot_creation_request: 机器人创建请求
+        db_session: 数据库会话
+        _: 当前管理员用户
+        tenant_id: 租户ID
+
+    返回:
+        SlackBot: 创建的机器人对象
+    """
     slack_bot_model = insert_slack_bot(
         db_session=db_session,
         name=slack_bot_creation_request.name,
@@ -248,6 +324,18 @@ def patch_bot(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> SlackBot:
+    """
+    更新现有的Slack机器人配置。
+
+    参数:
+        slack_bot_id: 要更新的机器人ID
+        slack_bot_creation_request: 更新请求
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        SlackBot: 更新后的机器人对象
+    """
     slack_bot_model = update_slack_bot(
         db_session=db_session,
         slack_bot_id=slack_bot_id,
@@ -265,6 +353,14 @@ def delete_bot(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> None:
+    """
+    删除指定的Slack机器人。
+
+    参数:
+        slack_bot_id: 要删除的机器人ID
+        db_session: 数据库会话
+        _: 当前管理员用户
+    """
     remove_slack_bot(
         db_session=db_session,
         slack_bot_id=slack_bot_id,
@@ -277,6 +373,17 @@ def get_bot_by_id(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> SlackBot:
+    """
+    根据ID获取Slack机器人。
+
+    参数:
+        slack_bot_id: 机器人ID
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        SlackBot: 机器人对象
+    """
     slack_bot_model = fetch_slack_bot(
         db_session=db_session,
         slack_bot_id=slack_bot_id,
@@ -289,6 +396,16 @@ def list_bots(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> list[SlackBot]:
+    """
+    获取所有Slack机器人列表。
+
+    参数:
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        list[SlackBot]: 机器人对象列表
+    """
     slack_bot_models = fetch_slack_bots(db_session=db_session)
     return [
         SlackBot.from_model(slack_bot_model) for slack_bot_model in slack_bot_models
@@ -301,6 +418,17 @@ def list_bot_configs(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_admin_user),
 ) -> list[SlackChannelConfig]:
+    """
+    获取指定机器人的所有频道配置。
+
+    参数:
+        bot_id: 机器人ID
+        db_session: 数据库会话
+        _: 当前管理员用户
+
+    返回:
+        list[SlackChannelConfig]: 频道配置对象列表
+    """
     slack_bot_config_models = fetch_slack_channel_configs(
         db_session=db_session, slack_bot_id=bot_id
     )

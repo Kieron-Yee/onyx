@@ -1,3 +1,12 @@
+"""
+This file contains database operations related to chat sessions and messages.
+It provides functions for creating, retrieving, updating and deleting chat sessions 
+and their associated messages.
+
+该文件包含与聊天会话和消息相关的数据库操作。
+提供了创建、获取、更新和删除聊天会话及其关联消息的功能。
+"""
+
 from collections.abc import Sequence
 from datetime import datetime
 from datetime import timedelta
@@ -51,6 +60,18 @@ def get_chat_session_by_id(
     include_deleted: bool = False,
     is_shared: bool = False,
 ) -> ChatSession:
+    """
+    根据ID获取聊天会话
+    
+    参数:
+    - chat_session_id: 聊天会话ID
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    - include_deleted: 是否包含已删除的会话
+    - is_shared: 是否为共享会话
+    
+    返回: ChatSession对象
+    """
     stmt = select(ChatSession).where(ChatSession.id == chat_session_id)
 
     if is_shared:
@@ -80,6 +101,9 @@ def get_chat_sessions_by_slack_thread_id(
     user_id: UUID | None,
     db_session: Session,
 ) -> Sequence[ChatSession]:
+    """
+    根据Slack线程ID获取聊天会话列表
+    """
     stmt = select(ChatSession).where(ChatSession.slack_thread_id == slack_thread_id)
     if user_id is not None:
         stmt = stmt.where(
@@ -92,6 +116,15 @@ def get_valid_messages_from_query_sessions(
     chat_session_ids: list[UUID],
     db_session: Session,
 ) -> dict[UUID, str]:
+    """
+    获取指定会话ID列表中的有效消息
+    
+    参数:
+    - chat_session_ids: 聊天会话ID列表
+    - db_session: 数据库会话
+    
+    返回: 以会话ID为键，消息内容为值的字典
+    """
     user_message_subquery = (
         select(
             ChatMessage.chat_session_id, func.min(ChatMessage.id).label("user_msg_id")
@@ -141,8 +174,6 @@ def get_valid_messages_from_query_sessions(
     return {row.chat_session_id: row.message for row in first_messages}
 
 
-# Retrieves chat sessions by user
-# Chat sessions do not include onyxbot flows
 def get_chat_sessions_by_user(
     user_id: UUID | None,
     deleted: bool | None,
@@ -150,6 +181,18 @@ def get_chat_sessions_by_user(
     include_onyxbot_flows: bool = False,
     limit: int = 50,
 ) -> list[ChatSession]:
+    """
+    获取指定用户的聊天会话列表
+    
+    参数:
+    - user_id: 用户ID
+    - deleted: 是否获取已删除的会话
+    - db_session: 数据库会话
+    - include_onyxbot_flows: 是否包含onyxbot流程会话
+    - limit: 返回结果数量限制
+    
+    返回: ChatSession对象列表
+    """
     stmt = select(ChatSession).where(ChatSession.user_id == user_id)
 
     if not include_onyxbot_flows:
@@ -172,6 +215,13 @@ def get_chat_sessions_by_user(
 def delete_search_doc_message_relationship(
     message_id: int, db_session: Session
 ) -> None:
+    """
+    删除消息与搜索文档之间的关联关系
+    
+    参数:
+    - message_id: 消息ID
+    - db_session: 数据库会话
+    """
     db_session.query(ChatMessage__SearchDoc).filter(
         ChatMessage__SearchDoc.chat_message_id == message_id
     ).delete(synchronize_session=False)
@@ -180,12 +230,25 @@ def delete_search_doc_message_relationship(
 
 
 def delete_tool_call_for_message_id(message_id: int, db_session: Session) -> None:
+    """
+    删除与消息关联的工具调用记录
+    
+    参数:
+    - message_id: 消息ID
+    - db_session: 数据库会话
+    """
     stmt = delete(ToolCall).where(ToolCall.message_id == message_id)
     db_session.execute(stmt)
     db_session.commit()
 
 
 def delete_orphaned_search_docs(db_session: Session) -> None:
+    """
+    删除孤立的搜索文档（没有关联任何消息的文档）
+    
+    参数:
+    - db_session: 数据库会话
+    """
     orphaned_docs = (
         db_session.query(SearchDoc)
         .outerjoin(ChatMessage__SearchDoc)
@@ -200,6 +263,13 @@ def delete_orphaned_search_docs(db_session: Session) -> None:
 def delete_messages_and_files_from_chat_session(
     chat_session_id: UUID, db_session: Session
 ) -> None:
+    """
+    删除聊天会话中的所有消息和相关文件
+    
+    参数:
+    - chat_session_id: 聊天会话ID
+    - db_session: 数据库会话
+    """
     # Select messages older than cutoff_time with files
     messages_with_files = db_session.execute(
         select(ChatMessage.id, ChatMessage.files).where(
@@ -234,6 +304,21 @@ def create_chat_session(
     onyxbot_flow: bool = False,
     slack_thread_id: str | None = None,
 ) -> ChatSession:
+    """
+    创建新的聊天会话
+    
+    参数:
+    - db_session: 数据库会话
+    - description: 会话描述
+    - user_id: 用户ID 
+    - persona_id: 角色ID
+    - llm_override: LLM覆盖设置
+    - prompt_override: 提示词覆盖设置
+    - onyxbot_flow: 是否为onyxbot流程
+    - slack_thread_id: Slack线程ID
+    
+    返回: 新创建的ChatSession对象
+    """
     chat_session = ChatSession(
         user_id=user_id,
         persona_id=persona_id,
@@ -256,11 +341,14 @@ def duplicate_chat_session_for_user_from_slack(
     chat_session_id: UUID,
 ) -> ChatSession:
     """
-    This takes a chat session id for a session in Slack and:
-    - Creates a new chat session in the DB
-    - Tries to copy the persona from the original chat session
-        (if it is available to the user clicking the button)
-    - Sets the user to the given user (if provided)
+    从Slack复制聊天会话给指定用户
+    
+    参数:
+    - db_session: 数据库会话
+    - user: 用户对象
+    - chat_session_id: 要复制的聊天会话ID
+    
+    返回: 新创建的ChatSession对象
     """
     chat_session = get_chat_session_by_id(
         chat_session_id=chat_session_id,
@@ -299,6 +387,18 @@ def update_chat_session(
     description: str | None = None,
     sharing_status: ChatSessionSharedStatus | None = None,
 ) -> ChatSession:
+    """
+    更新聊天会话信息
+    
+    参数:
+    - db_session: 数据库会话
+    - user_id: 用户ID
+    - chat_session_id: 聊天会话ID
+    - description: 新的会话描述
+    - sharing_status: 新的共享状态
+    
+    返回: 更新后的ChatSession对象
+    """
     chat_session = get_chat_session_by_id(
         chat_session_id=chat_session_id, user_id=user_id, db_session=db_session
     )
@@ -319,6 +419,14 @@ def update_chat_session(
 def delete_all_chat_sessions_for_user(
     user: User | None, db_session: Session, hard_delete: bool = HARD_DELETE_CHATS
 ) -> None:
+    """
+    删除用户的所有聊天会话
+    
+    参数:
+    - user: 用户对象
+    - db_session: 数据库会话
+    - hard_delete: 是否硬删除（真实删除而不是标记删除）
+    """
     user_id = user.id if user is not None else None
 
     query = db_session.query(ChatSession).filter(
@@ -339,6 +447,15 @@ def delete_chat_session(
     db_session: Session,
     hard_delete: bool = HARD_DELETE_CHATS,
 ) -> None:
+    """
+    删除聊天会话
+    
+    参数:
+    - user_id: 用户ID
+    - chat_session_id: 聊天会话ID
+    - db_session: 数据库会话
+    - hard_delete: 是否硬删除(真实删除而不是标记删除)
+    """
     chat_session = get_chat_session_by_id(
         chat_session_id=chat_session_id, user_id=user_id, db_session=db_session
     )
@@ -359,6 +476,13 @@ def delete_chat_session(
 
 
 def delete_chat_sessions_older_than(days_old: int, db_session: Session) -> None:
+    """
+    删除指定天数之前的聊天会话
+    
+    参数:
+    - days_old: 天数
+    - db_session: 数据库会话
+    """
     cutoff_time = datetime.utcnow() - timedelta(days=days_old)
     old_sessions = db_session.execute(
         select(ChatSession.user_id, ChatSession.id).where(
@@ -375,6 +499,16 @@ def get_chat_message(
     user_id: UUID | None,
     db_session: Session,
 ) -> ChatMessage:
+    """
+    获取单条聊天消息
+    
+    参数:
+    - chat_message_id: 聊天消息ID
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    
+    返回: ChatMessage对象
+    """
     stmt = select(ChatMessage).where(ChatMessage.id == chat_message_id)
 
     result = db_session.execute(stmt)
@@ -423,6 +557,17 @@ def get_chat_messages_by_sessions(
     db_session: Session,
     skip_permission_check: bool = False,
 ) -> Sequence[ChatMessage]:
+    """
+    获取多个会话的所有聊天消息
+    
+    参数:
+    - chat_session_ids: 聊天会话ID列表
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    - skip_permission_check: 是否跳过权限检查
+    
+    返回: ChatMessage对象序列
+    """
     if not skip_permission_check:
         for chat_session_id in chat_session_ids:
             get_chat_session_by_id(
@@ -441,6 +586,14 @@ def add_chats_to_session_from_slack_thread(
     slack_chat_session_id: UUID,
     new_chat_session_id: UUID,
 ) -> None:
+    """
+    从Slack线程复制聊天消息到新会话
+    
+    参数:
+    - db_session: 数据库会话
+    - slack_chat_session_id: Slack聊天会话ID
+    - new_chat_session_id: 新会话ID
+    """
     new_root_message = get_or_create_root_message(
         chat_session_id=new_chat_session_id,
         db_session=db_session,
@@ -477,6 +630,15 @@ def add_chats_to_session_from_slack_thread(
 def get_search_docs_for_chat_message(
     chat_message_id: int, db_session: Session
 ) -> list[SearchDoc]:
+    """
+    获取与聊天消息关联的搜索文档列表
+    
+    参数:
+    - chat_message_id: 聊天消息ID
+    - db_session: 数据库会话
+    
+    返回: 搜索文档列表
+    """
     stmt = (
         select(SearchDoc)
         .join(
@@ -495,6 +657,18 @@ def get_chat_messages_by_session(
     skip_permission_check: bool = False,
     prefetch_tool_calls: bool = False,
 ) -> list[ChatMessage]:
+    """
+    获取单个会话的所有聊天消息
+    
+    参数:
+    - chat_session_id: 聊天会话ID
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    - skip_permission_check: 是否跳过权限检查
+    - prefetch_tool_calls: 是否预加载工具调用信息
+    
+    返回: ChatMessage对象列表
+    """
     if not skip_permission_check:
         get_chat_session_by_id(
             chat_session_id=chat_session_id, user_id=user_id, db_session=db_session
@@ -519,6 +693,15 @@ def get_or_create_root_message(
     chat_session_id: UUID,
     db_session: Session,
 ) -> ChatMessage:
+    """
+    获取或创建会话的根消息
+    
+    参数:
+    - chat_session_id: 聊天会话ID
+    - db_session: 数据库会话
+    
+    返回: ChatMessage对象（根消息）
+    """
     try:
         root_message: ChatMessage | None = (
             db_session.query(ChatMessage)
@@ -556,6 +739,17 @@ def reserve_message_id(
     parent_message: int,
     message_type: MessageType,
 ) -> int:
+    """
+    预留消息ID
+    
+    参数:
+    - db_session: 数据库会话
+    - chat_session_id: 聊天会话ID
+    - parent_message: 父消息ID
+    - message_type: 消息类型
+    
+    返回: 预留的消息ID
+    """
     # Create an empty chat message
     empty_message = ChatMessage(
         chat_session_id=chat_session_id,
@@ -598,6 +792,30 @@ def create_new_chat_message(
     reserved_message_id: int | None = None,
     overridden_model: str | None = None,
 ) -> ChatMessage:
+    """
+    创建新的聊天消息
+    
+    参数:
+    - chat_session_id: 聊天会话ID
+    - parent_message: 父消息
+    - message: 消息内容
+    - prompt_id: 提示词ID
+    - token_count: token数量
+    - message_type: 消息类型
+    - db_session: 数据库会话
+    - files: 相关文件列表
+    - rephrased_query: 重新表述的查询
+    - error: 错误信息
+    - reference_docs: 参考文档
+    - alternate_assistant_id: 备选助手ID
+    - citations: 引用
+    - tool_call: 工具调用
+    - commit: 是否提交事务
+    - reserved_message_id: 预留消息ID
+    - overridden_model: 覆盖模型
+    
+    返回: 新创建的ChatMessage对象
+    """
     if reserved_message_id is not None:
         # Edit existing message
         existing_message = db_session.query(ChatMessage).get(reserved_message_id)
@@ -658,6 +876,14 @@ def set_as_latest_chat_message(
     user_id: UUID | None,
     db_session: Session,
 ) -> None:
+    """
+    将指定消息设置为最新消息
+    
+    参数:
+    - chat_message: 聊天消息对象
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    """
     parent_message_id = chat_message.parent_message
 
     if parent_message_id is None:
@@ -680,6 +906,15 @@ def attach_files_to_chat_message(
     db_session: Session,
     commit: bool = True,
 ) -> None:
+    """
+    为聊天消息附加文件
+    
+    参数:
+    - chat_message: 聊天消息对象
+    - files: 文件描述符列表
+    - db_session: 数据库会话
+    - commit: 是否立即提交事务
+    """
     chat_message.files = files
     if commit:
         db_session.commit()
@@ -691,6 +926,17 @@ def get_prompt_by_id(
     db_session: Session,
     include_deleted: bool = False,
 ) -> Prompt:
+    """
+    获取提示词
+    
+    参数:
+    - prompt_id: 提示词ID
+    - user: 用户对象
+    - db_session: 数据库会话
+    - include_deleted: 是否包含已删除的提示词
+    
+    返回: Prompt对象
+    """
     stmt = select(Prompt).where(Prompt.id == prompt_id)
 
     # if user is not specified OR they are an admin, they should
@@ -719,6 +965,18 @@ def get_doc_query_identifiers_from_model(
     db_session: Session,
     enforce_chat_session_id_for_search_docs: bool,
 ) -> list[tuple[str, int]]:
+    """
+    根据搜索文档ID获取文档查询标识符
+    
+    参数:
+    - search_doc_ids: 搜索文档ID列表
+    - chat_session: 聊天会话对象
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    - enforce_chat_session_id_for_search_docs: 是否强制检查文档所属会话
+    
+    返回: 文档ID和分块索引的元组列表
+    """
     """Given a list of search_doc_ids"""
     search_docs = (
         db_session.query(SearchDoc).filter(SearchDoc.id.in_(search_doc_ids)).all()
@@ -755,6 +1013,14 @@ def update_search_docs_table_with_relevance(
     reference_db_search_docs: list[SearchDoc],
     relevance_summary: DocumentRelevance,
 ) -> None:
+    """
+    更新搜索文档表中的相关性信息
+    
+    参数:
+    - db_session: 数据库会话
+    - reference_db_search_docs: 搜索文档列表
+    - relevance_summary: 文档相关性总结
+    """
     for search_doc in reference_db_search_docs:
         relevance_data = relevance_summary.relevance_summaries.get(
             search_doc.document_id
@@ -775,6 +1041,15 @@ def create_db_search_doc(
     server_search_doc: ServerSearchDoc,
     db_session: Session,
 ) -> SearchDoc:
+    """
+    创建数据库搜索文档
+    
+    参数:
+    - server_search_doc: 服务器搜索文档对象
+    - db_session: 数据库会话
+    
+    返回: SearchDoc对象
+    """
     db_search_doc = SearchDoc(
         document_id=server_search_doc.document_id,
         chunk_ind=server_search_doc.chunk_ind,
@@ -811,6 +1086,15 @@ def translate_db_search_doc_to_server_search_doc(
     db_search_doc: SearchDoc,
     remove_doc_content: bool = False,
 ) -> SavedSearchDoc:
+    """
+    将数据库搜索文档对象转换为服务器搜索文档对象
+    
+    参数:
+    - db_search_doc: 数据库搜索文档对象
+    - remove_doc_content: 是否移除文档内容
+    
+    返回: SavedSearchDoc对象
+    """
     return SavedSearchDoc(
         db_doc_id=db_search_doc.id,
         document_id=db_search_doc.document_id,
@@ -840,6 +1124,15 @@ def translate_db_search_doc_to_server_search_doc(
 def get_retrieval_docs_from_chat_message(
     chat_message: ChatMessage, remove_doc_content: bool = False
 ) -> RetrievalDocs:
+    """
+    从聊天消息中获取检索文档
+    
+    参数:
+    - chat_message: 聊天消息对象
+    - remove_doc_content: 是否移除文档内容
+    
+    返回: RetrievalDocs对象
+    """
     top_documents = [
         translate_db_search_doc_to_server_search_doc(
             db_doc, remove_doc_content=remove_doc_content
@@ -854,6 +1147,15 @@ def translate_db_message_to_chat_message_detail(
     chat_message: ChatMessage,
     remove_doc_content: bool = False,
 ) -> ChatMessageDetail:
+    """
+    将数据库消息对象转换为聊天消息详情对象
+    
+    参数:
+    - chat_message: 聊天消息对象
+    - remove_doc_content: 是否移除文档内容
+    
+    返回: ChatMessageDetail对象
+    """
     chat_msg_detail = ChatMessageDetail(
         chat_session_id=chat_message.chat_session_id,
         message_id=chat_message.id,

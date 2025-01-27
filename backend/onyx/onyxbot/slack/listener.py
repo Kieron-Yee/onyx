@@ -1,3 +1,22 @@
+"""
+此文件实现了Slack机器人的监听器功能,是Slack机器人系统的核心组件。
+
+主要功能:
+1. 管理多租户的Slack WebSocket连接
+2. 处理来自Slack的各种事件和消息
+3. 实现租户的自动获取和释放
+4. 维护租户连接的心跳机制
+5. 处理用户反馈和交互
+6. 实现优雅的启动和关闭机制
+
+技术特点:
+- 使用WebSocket保持与Slack的实时通信
+- 支持多租户架构
+- 实现了完整的错误处理和日志记录
+- 集成了Prometheus监控指标
+- 使用Redis实现分布式锁和心跳机制
+"""
+
 import asyncio
 import os
 import signal
@@ -100,6 +119,7 @@ active_tenants_gauge = Gauge(
 # In rare cases, some users have been experiencing a massive amount of trivial messages coming through
 # to the Slack Bot with trivial messages. Adding this to avoid exploding LLM costs while we track down
 # the cause.
+# 在极少数情况下,一些用户会收到大量琐碎的消息发送到Slack机器人。添加此项以避免在追踪原因时导致LLM成本激增。
 _SLACK_GREETINGS_TO_IGNORE = {
     "Welcome back!",
     "It's going to be a great day.",
@@ -111,14 +131,28 @@ _SLACK_GREETINGS_TO_IGNORE = {
 }
 
 # This is always (currently) the user id of Slack's official slackbot
+# 这是Slack官方机器人的用户ID(当前)
 _OFFICIAL_SLACKBOT_USER_ID = "USLACKBOT"
 
 
 class SlackbotHandler:
+    """
+    Slack机器人处理器类,负责管理多租户的Slack连接。
+    主要功能:
+    - 初始化和维护与Slack的WebSocket连接
+    - 管理租户的获取和心跳
+    - 处理优雅关闭
+    """
+
     def __init__(self) -> None:
+        """
+        初始化SlackbotHandler实例。
+        设置基本属性、启动Prometheus指标服务器、注册信号处理器并启动后台线程。
+        """
         logger.info("Initializing SlackbotHandler")
         self.tenant_ids: Set[str | None] = set()
         # The keys for these dictionaries are tuples of (tenant_id, slack_bot_id)
+        # 这些字典的键是(tenant_id, slack_bot_id)元组
         self.socket_clients: Dict[tuple[str | None, int], TenantSocketModeClient] = {}
         self.slack_bot_tokens: Dict[tuple[str | None, int], SlackBotTokens] = {}
 
@@ -151,11 +185,21 @@ class SlackbotHandler:
         logger.info("Background threads started")
 
     def get_pod_id(self) -> str:
+        """
+        获取Pod的ID。
+        
+        返回:
+            str: Pod的ID,如果未设置则返回'unknown_pod'
+        """
         pod_id = os.environ.get("HOSTNAME", "unknown_pod")
         logger.info(f"Retrieved pod ID: {pod_id}")
         return pod_id
 
     def acquire_tenants_loop(self) -> None:
+        """
+        循环获取租户的后台线程。
+        定期尝试获取新租户并更新活跃租户数量指标。
+        """
         while not self._shutdown_event.is_set():
             try:
                 self.acquire_tenants()
@@ -168,6 +212,10 @@ class SlackbotHandler:
             self._shutdown_event.wait(timeout=TENANT_ACQUISITION_INTERVAL)
 
     def heartbeat_loop(self) -> None:
+        """
+        心跳循环的后台线程。
+        定期为所有活跃租户发送心跳信号以保持连接。
+        """
         while not self._shutdown_event.is_set():
             try:
                 self.send_heartbeats()
@@ -179,6 +227,14 @@ class SlackbotHandler:
     def _manage_clients_per_tenant(
         self, db_session: Session, tenant_id: str | None, bot: SlackBot
     ) -> None:
+        """
+        管理每个租户的客户端连接。
+        
+        参数:
+            db_session: 数据库会话
+            tenant_id: 租户ID 
+            bot: Slack机器人实例
+        """
         slack_bot_tokens = SlackBotTokens(
             bot_token=bot.bot_token,
             app_token=bot.app_token,
@@ -223,6 +279,10 @@ class SlackbotHandler:
             self.start_socket_client(bot.id, tenant_id, slack_bot_tokens)
 
     def acquire_tenants(self) -> None:
+        """
+        尝试获取新的租户并建立连接。
+        处理租户的锁定机制并为每个获取的租户创建socket客户端。
+        """
         tenant_ids = get_all_tenant_ids()
 
         for tenant_id in tenant_ids:
@@ -286,6 +346,10 @@ class SlackbotHandler:
                 CURRENT_TENANT_ID_CONTEXTVAR.reset(token)
 
     def send_heartbeats(self) -> None:
+        """
+        为所有活跃租户发送心跳信号。
+        更新Redis中的心跳时间戳。
+        """
         current_time = int(time.time())
         logger.debug(f"Sending heartbeats for {len(self.tenant_ids)} tenants")
         for tenant_id in self.tenant_ids:
@@ -298,6 +362,14 @@ class SlackbotHandler:
     def start_socket_client(
         self, slack_bot_id: int, tenant_id: str | None, slack_bot_tokens: SlackBotTokens
     ) -> None:
+        """
+        为指定的租户启动socket客户端。
+        
+        参数:
+            slack_bot_id: Slack机器人ID
+            tenant_id: 租户ID
+            slack_bot_tokens: Slack机器人的token信息
+        """
         logger.info(
             f"Starting socket client for tenant: {tenant_id}, app: {slack_bot_id}"
         )
@@ -321,6 +393,10 @@ class SlackbotHandler:
         )
 
     def stop_socket_clients(self) -> None:
+        """
+        停止所有活跃的socket客户端连接。
+        在关闭时调用以清理资源。
+        """
         logger.info(f"Stopping {len(self.socket_clients)} socket clients")
         for (tenant_id, slack_bot_id), client in self.socket_clients.items():
             asyncio.run(client.close())
@@ -329,6 +405,14 @@ class SlackbotHandler:
             )
 
     def shutdown(self, signum: int | None, frame: FrameType | None) -> None:
+        """
+        优雅关闭处理器。
+        清理所有连接、释放锁并停止后台线程。
+        
+        参数:
+            signum: 信号编号
+            frame: 当前执行帧
+        """
         if not self.running:
             return
 
@@ -360,9 +444,19 @@ class SlackbotHandler:
 
 
 def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -> bool:
-    """True to keep going, False to ignore this Slack request"""
+    """
+    预过滤Slack请求,决定是否需要处理该请求。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    
+    返回:
+        bool: True表示继续处理,False表示忽略该请求
+    """
     if req.type == "events_api":
         # Verify channel is valid
+        # 验证频道是否有效
         event = cast(dict[str, Any], req.payload.get("event", {}))
         msg = cast(str | None, event.get("text"))
         channel = cast(str | None, event.get("channel"))
@@ -370,6 +464,7 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
 
         # This should never happen, but we can't continue without a channel since
         # we can't send a response without it
+        # 这种情况永远不应该发生,但如果没有频道我们就无法继续,因为无法发送响应
         if not channel:
             channel_specific_logger.warning("Found message without channel - skipping")
             return False
@@ -403,6 +498,7 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
             return False
 
         # Ensure that the message is a new message of expected type
+        # 确保消息是预期类型的新消息
         event_type = event.get("type")
         if event_type not in ["app_mention", "message"]:
             channel_specific_logger.info(
@@ -417,14 +513,16 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
             is_onyx_bot_msg = bot_tag_id and bot_tag_id in event.get("user", "")
 
             # OnyxBot should never respond to itself
+            # OnyxBot永远不应该回复自己的消息
             if is_onyx_bot_msg:
                 logger.info("Ignoring message from OnyxBot")
                 return False
 
-            # DMs with the bot don't pick up the @OnyxBot so we have to keep the
-            # caught events_api
+            # DMs with the bot don't pick up the @OnyxBot so we have to keep the caught events_api
+            # 与机器人的私信不会捕获@OnyxBot标记,所以我们必须保留捕获的events_api
             if is_tagged and not is_dm:
                 # Let the tag flow handle this case, don't reply twice
+                # 让标记流程处理这种情况,不要重复回复
                 return False
 
         if event.get("bot_profile"):
@@ -439,6 +537,7 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
                     channel_name=channel_name,
                 )
             # If OnyxBot is not specifically tagged and the channel is not set to respond to bots, ignore the message
+            # 如果OnyxBot没有被特别标记且频道未设置回复机器人,则忽略该消息
             if (not bot_tag_id or bot_tag_id not in msg) and (
                 not slack_channel_config
                 or not slack_channel_config.channel_config.get("respond_to_bots")
@@ -449,6 +548,8 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
         # Ignore things like channel_join, channel_leave, etc.
         # NOTE: "file_share" is just a message with a file attachment, so we
         # should not ignore it
+        # 忽略channel_join、channel_leave等消息
+        # 注意："file_share"只是带有文件附件的消息,所以不应该忽略
         message_subtype = event.get("subtype")
         if message_subtype not in [None, "file_share"]:
             channel_specific_logger.info(
@@ -460,6 +561,8 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
         thread_ts = event.get("thread_ts")
         # Pick the root of the thread (if a thread exists)
         # Can respond in thread if it's an "im" directly to Onyx or @OnyxBot is tagged
+        # 选择线程的根消息(如果线程存在)
+        # 如果是直接发给Onyx的私信或@OnyxBot被标记,可以在线程中回复
         if (
             thread_ts
             and message_ts != thread_ts
@@ -478,6 +581,7 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
 
     if req.type == "slash_commands":
         # Verify that there's an associated channel
+        # 验证是否有相关联的频道
         channel = req.payload.get("channel_id")
         channel_specific_logger = setup_logger(extra={SLACK_CHANNEL_ID: channel})
 
@@ -502,6 +606,13 @@ def prefilter_requests(req: SocketModeRequest, client: TenantSocketModeClient) -
 
 
 def process_feedback(req: SocketModeRequest, client: TenantSocketModeClient) -> None:
+    """
+    处理Slack反馈请求。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    """
     if actions := req.payload.get("actions"):
         action = cast(dict[str, Any], actions[0])
         feedback_type = cast(str, action.get("action_id"))
@@ -533,6 +644,19 @@ def process_feedback(req: SocketModeRequest, client: TenantSocketModeClient) -> 
 def build_request_details(
     req: SocketModeRequest, client: TenantSocketModeClient
 ) -> SlackMessageInfo:
+    """
+    构建Slack请求的详细信息。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    
+    返回:
+        SlackMessageInfo: 包含消息详细信息的对象
+        
+    异常:
+        RuntimeError: 当请求类型无效时抛出
+    """
     if req.type == "events_api":
         event = cast(dict[str, Any], req.payload["event"])
         msg = cast(str, event["text"])
@@ -612,6 +736,13 @@ def apologize_for_fail(
     details: SlackMessageInfo,
     client: TenantSocketModeClient,
 ) -> None:
+    """
+    当无法找到相关回答时发送道歉消息。
+    
+    参数:
+        details: 消息详细信息
+        client: 租户socket客户端
+    """
     respond_in_thread(
         client=client.web_client,
         channel=details.channel_to_respond,
@@ -626,6 +757,15 @@ def process_message(
     respond_every_channel: bool = DANSWER_BOT_RESPOND_EVERY_CHANNEL,
     notify_no_answer: bool = NOTIFY_SLACKBOT_NO_ANSWER,
 ) -> None:
+    """
+    处理Slack消息请求。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+        respond_every_channel: 是否响应所有频道
+        notify_no_answer: 无答案时是否通知
+    """
     logger.debug(
         f"Received Slack request of type: '{req.type}' for tenant, {client.tenant_id}"
     )
@@ -653,14 +793,18 @@ def process_message(
             )
 
             # Be careful about this default, don't want to accidentally spam every channel
-            # Users should be able to DM slack bot in their private channels though
+            # 请谨慎对待这个默认设置,不要意外地向所有频道发送垃圾消息
+            # 不过用户应该能够在他们的私人频道中与slack机器人进行私信
             if (
                 slack_channel_config is None
                 and not respond_every_channel
                 # Can't have configs for DMs so don't toss them out
+                # 私信无法设置配置,所以不要排除它们
                 and not is_dm
                 # If /OnyxBot (is_bot_msg) or @OnyxBot (bypass_filters)
                 # always respond with the default configs
+                # 如果是/OnyxBot(is_bot_msg)或@OnyxBot(bypass_filters)
+                # 总是使用默认配置进行响应
                 and not (details.is_bot_msg or details.bypass_filters)
             ):
                 return
@@ -699,19 +843,35 @@ def process_message(
 
 
 def acknowledge_message(req: SocketModeRequest, client: TenantSocketModeClient) -> None:
+    """
+    确认收到Slack消息。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    """
     response = SocketModeResponse(envelope_id=req.envelope_id)
     client.send_socket_mode_response(response)
 
 
 def action_routing(req: SocketModeRequest, client: TenantSocketModeClient) -> None:
+    """
+    路由处理Slack交互动作。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    """
     if actions := req.payload.get("actions"):
         action = cast(dict[str, Any], actions[0])
 
         if action["action_id"] in [DISLIKE_BLOCK_ACTION_ID, LIKE_BLOCK_ACTION_ID]:
             # AI Answer feedback
+            # AI回答反馈
             return process_feedback(req, client)
         elif action["action_id"] == FEEDBACK_DOC_BUTTON_BLOCK_ACTION_ID:
             # Activation of the "source feedback" button
+            # 激活"源反馈"按钮
             return handle_doc_feedback_button(req, client)
         elif action["action_id"] == FOLLOWUP_BUTTON_ACTION_ID:
             return handle_followup_button(req, client)
@@ -724,6 +884,13 @@ def action_routing(req: SocketModeRequest, client: TenantSocketModeClient) -> No
 
 
 def view_routing(req: SocketModeRequest, client: TenantSocketModeClient) -> None:
+    """
+    路由处理Slack视图提交。
+    
+    参数:
+        req: Slack socket模式请求
+        client: 租户socket客户端
+    """
     if view := req.payload.get("view"):
         if view["callback_id"] == VIEW_DOC_FEEDBACK_ID:
             return process_feedback(req, client)
@@ -732,11 +899,27 @@ def view_routing(req: SocketModeRequest, client: TenantSocketModeClient) -> None
 def create_process_slack_event() -> (
     Callable[[TenantSocketModeClient, SocketModeRequest], None]
 ):
+    """
+    创建处理Slack事件的函数。
+    
+    返回:
+        Callable: 处理Slack事件的函数
+    """
+    
     def process_slack_event(
         client: TenantSocketModeClient, req: SocketModeRequest
     ) -> None:
+        """
+        处理Slack事件的内部函数。
+        
+        参数:
+            client: 租户socket客户端
+            req: Slack socket模式请求
+        """
         # Always respond right away, if Slack doesn't receive these frequently enough
         # it will assume the Bot is DEAD!!! :(
+        # 始终立即响应,如果Slack没有足够频繁地收到响应
+        # 它会认为机器人已经死了!!! :(
         acknowledge_message(req, client)
 
         try:
@@ -756,10 +939,23 @@ def create_process_slack_event() -> (
 def _get_socket_client(
     slack_bot_tokens: SlackBotTokens, tenant_id: str | None, slack_bot_id: int
 ) -> TenantSocketModeClient:
+    """
+    获取socket客户端实例。
+    
+    参数:
+        slack_bot_tokens: Slack机器人的token信息
+        tenant_id: 租户ID
+        slack_bot_id: Slack机器人ID
+    
+    返回:
+        TenantSocketModeClient: socket客户端实例
+    """
     # For more info on how to set this up, checkout the docs:
+    # 关于如何设置的更多信息,请查看文档:
     # https://docs.onyx.app/slack_bot_setup
     return TenantSocketModeClient(
         # This app-level token will be used only for establishing a connection
+        # 这个应用级别的token只用于建立连接
         app_token=slack_bot_tokens.app_token,
         web_client=WebClient(token=slack_bot_tokens.bot_token),
         tenant_id=tenant_id,
@@ -768,7 +964,15 @@ def _get_socket_client(
 
 
 if __name__ == "__main__":
+    """
+    主程序入口:
+    1. 初始化SlackbotHandler
+    2. 设置环境变量
+    3. 下载NLTK数据
+    4. 保持主线程运行
+    """
     # Initialize the tenant handler which will manage tenant connections
+    # 初始化租户处理器,用于管理租户连接
     logger.info("Starting SlackbotHandler")
     tenant_handler = SlackbotHandler()
 
@@ -779,6 +983,7 @@ if __name__ == "__main__":
 
     try:
         # Keep the main thread alive
+        # 保持主线程运行
         while tenant_handler.running:
             time.sleep(1)
 

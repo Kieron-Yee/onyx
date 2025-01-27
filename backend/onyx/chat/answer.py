@@ -1,3 +1,13 @@
+"""
+此文件实现了问答系统的核心功能，主要用于处理用户提问并生成回答。
+主要功能包括:
+1. 处理用户输入的问题
+2. 调用LLM模型生成回答
+3. 处理工具调用
+4. 管理答案生成流程
+5. 处理引用和上下文信息
+"""
+
 from collections.abc import Callable
 from collections.abc import Iterator
 from uuid import uuid4
@@ -42,37 +52,60 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 
+# 定义答案流类型
 AnswerStream = Iterator[AnswerQuestionPossibleReturn | ToolCallKickoff | ToolResponse]
 
 
 class Answer:
+    """
+    回答处理类，负责协调整个问答过程。
+    
+    主要职责：
+    - 初始化和管理问答会话的各个组件
+    - 处理用户输入
+    - 协调LLM调用和工具使用
+    - 生成最终答案
+    """
+
     def __init__(
         self,
-        question: str,
-        answer_style_config: AnswerStyleConfig,
-        llm: LLM,
-        prompt_config: PromptConfig,
-        force_use_tool: ForceUseTool,
-        # must be the same length as `docs`. If None, all docs are considered "relevant"
-        message_history: list[PreviousMessage] | None = None,
-        single_message_history: str | None = None,
-        # newly passed in files to include as part of this question
-        # TODO THIS NEEDS TO BE HANDLED
-        latest_query_files: list[InMemoryChatFile] | None = None,
-        files: list[InMemoryChatFile] | None = None,
-        tools: list[Tool] | None = None,
-        # NOTE: for native tool-calling, this is only supported by OpenAI atm,
-        #       but we only support them anyways
-        # if set to True, then never use the LLMs provided tool-calling functonality
-        skip_explicit_tool_calling: bool = False,
-        # Returns the full document sections text from the search tool
-        return_contexts: bool = False,
-        skip_gen_ai_answer_generation: bool = False,
-        is_connected: Callable[[], bool] | None = None,
+        question: str,  # 用户的问题
+        answer_style_config: AnswerStyleConfig,  # 回答样式配置
+        llm: LLM,  # 语言模型接口
+        prompt_config: PromptConfig,  # 提示词配置
+        force_use_tool: ForceUseTool,  # 强制使用工具配置
+        message_history: list[PreviousMessage] | None = None,  # 消息历史记录
+        single_message_history: str | None = None,  # 单条消息历史
+        latest_query_files: list[InMemoryChatFile] | None = None,  # 最新查询相关文件
+        files: list[InMemoryChatFile] | None = None,  # 所有相关文件
+        tools: list[Tool] | None = None,  # 可用工具列表
+        skip_explicit_tool_calling: bool = False,  # 是否跳过显式工具调用
+        return_contexts: bool = False,  # 是否返回搜索工具的完整文档片段
+        skip_gen_ai_answer_generation: bool = False,  # 是否跳过AI回答生成
+        is_connected: Callable[[], bool] | None = None,  # 连接状态检查函数
     ) -> None:
+        """
+        初始化Answer类的实例
+        
+        参数说明：
+        - question: 用户问题
+        - answer_style_config: 回答样式配置
+        - llm: 语言模型实例
+        - prompt_config: 提示词配置
+        - force_use_tool: 强制使用工具的配置
+        - message_history: 消息历史记录列表
+        - single_message_history: 单条消息历史
+        - latest_query_files: 最新查询相关的文件列表
+        - files: 所有相关文件列表
+        - tools: 可用工具列表
+        - skip_explicit_tool_calling: 是否跳过显式工具调用
+        - return_contexts: 是否返回上下文
+        - skip_gen_ai_answer_generation: 是否跳过AI回答生成
+        - is_connected: 检查连接状态的回调函数
+        """
         if single_message_history and message_history:
             raise ValueError(
-                "Cannot provide both `message_history` and `single_message_history`"
+                "Cannot provide both `message_history` and `single_message_history`"  # 不能同时提供message_history和single_message_history
             )
 
         self.question = question
@@ -116,6 +149,16 @@ class Answer:
         )
 
     def _get_tools_list(self) -> list[Tool]:
+        """
+        获取工具列表
+        
+        根据force_use_tool配置返回可用的工具列表：
+        - 如果未强制使用工具，返回所有工具
+        - 如果强制使用工具，返回指定的工具
+        
+        返回值：
+        - list[Tool]: 可用工具列表
+        """
         if not self.force_use_tool.force_use:
             return self.tools
 
@@ -138,6 +181,17 @@ class Answer:
     def _handle_specified_tool_call(
         self, llm_calls: list[LLMCall], tool: Tool, tool_args: dict
     ) -> AnswerStream:
+        """
+        处理指定的工具调用
+        
+        参数：
+        - llm_calls: LLM调用历史
+        - tool: 要使用的工具
+        - tool_args: 工具参数
+        
+        返回：
+        - AnswerStream: 答案流迭代器
+        """
         current_llm_call = llm_calls[-1]
 
         # make a dummy tool handler
@@ -162,6 +216,21 @@ class Answer:
             raise RuntimeError("Tool call handler did not return a new LLM call")
 
     def _get_response(self, llm_calls: list[LLMCall]) -> AnswerStream:
+        """
+        获取LLM响应并处理
+        
+        主要流程：
+        1. 处理强制工具调用
+        2. 处理非工具调用LLM的特殊逻辑
+        3. 设置响应处理器
+        4. 调用LLM生成回答
+        
+        参数：
+        - llm_calls: LLM调用历史记录
+        
+        返回：
+        - AnswerStream: 答案流迭代器
+        """
         current_llm_call = llm_calls[-1]
 
         # handle the case where no decision has to be made; we simply run the tool
@@ -256,6 +325,17 @@ class Answer:
 
     @property
     def processed_streamed_output(self) -> AnswerStream:
+        """
+        处理并返回流式输出
+        
+        主要功能：
+        1. 构建提示信息
+        2. 初始化LLM调用
+        3. 处理响应流
+        
+        返回：
+        - AnswerStream: 处理后的答案流
+        """
         if self._processed_stream is not None:
             yield from self._processed_stream
             return
@@ -292,6 +372,12 @@ class Answer:
 
     @property
     def llm_answer(self) -> str:
+        """
+        获取LLM生成的完整答案文本
+        
+        返回：
+        - str: 完整的答案文本
+        """
         answer = ""
         for packet in self.processed_streamed_output:
             if isinstance(packet, OnyxAnswerPiece) and packet.answer_piece:
@@ -301,6 +387,12 @@ class Answer:
 
     @property
     def citations(self) -> list[CitationInfo]:
+        """
+        获取引用信息列表
+        
+        返回：
+        - list[CitationInfo]: 引用信息列表
+        """
         citations: list[CitationInfo] = []
         for packet in self.processed_streamed_output:
             if isinstance(packet, CitationInfo):
@@ -309,6 +401,12 @@ class Answer:
         return citations
 
     def is_cancelled(self) -> bool:
+        """
+        检查当前会话是否已被取消
+        
+        返回：
+        - bool: 如果会话被取消返回True，否则返回False
+        """
         if self._is_cancelled:
             return True
 

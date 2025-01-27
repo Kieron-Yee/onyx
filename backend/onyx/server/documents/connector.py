@@ -1,3 +1,15 @@
+"""
+这个文件是主要的连接器管理模块。它提供了以下功能:
+1. 连接器的创建、更新、删除和查询
+2. 连接器凭证的管理
+3. 连接器索引状态的监控
+4. Google Drive和Gmail等特定连接器的OAuth授权流程
+5. 文件上传处理
+6. 管理员和基本用户的API接口
+
+主要包含了连接器管理相关的所有FastAPI路由处理程序。
+"""
+
 import os
 import uuid
 from typing import cast
@@ -115,47 +127,84 @@ from onyx.utils.logger import setup_logger
 from onyx.utils.telemetry import create_milestone_and_report
 from onyx.utils.variable_functionality import fetch_ee_implementation_or_noop
 
+# 设置日志记录器
 logger = setup_logger()
 
+# Gmail凭证ID的cookie名称
 _GMAIL_CREDENTIAL_ID_COOKIE_NAME = "gmail_credential_id"
+# Google Drive凭证ID的cookie名称 
 _GOOGLE_DRIVE_CREDENTIAL_ID_COOKIE_NAME = "google_drive_credential_id"
-
 
 router = APIRouter(prefix="/manage")
 
-
-"""Admin only API endpoints"""
-
+"""管理员API端点 Admin only API endpoints"""
 
 @router.get("/admin/connector/gmail/app-credential")
 def check_google_app_gmail_credentials_exist(
     _: User = Depends(current_curator_or_admin_user),
 ) -> dict[str, str]:
+    """
+    检查Gmail应用凭证是否存在
+    
+    Args:
+        _: 当前管理员或策展人用户
+    
+    Returns:
+        包含client_id的字典
+        
+    Raises:
+        HTTPException: 当找不到Google应用凭证时抛出404错误
+    """
     try:
         return {"client_id": get_google_app_cred(DocumentSource.GMAIL).web.client_id}
     except KvKeyNotFoundError:
         raise HTTPException(status_code=404, detail="Google App Credentials not found")
 
-
-@router.put("/admin/connector/gmail/app-credential")
+@router.put("/admin/connector/gmail/app-credential") 
 def upsert_google_app_gmail_credentials(
-    app_credentials: GoogleAppCredentials, _: User = Depends(current_admin_user)
+    app_credentials: GoogleAppCredentials, 
+    _: User = Depends(current_admin_user)
 ) -> StatusResponse:
+    """
+    更新或插入Gmail应用凭证
+    
+    Args:
+        app_credentials: Gmail应用凭证数据
+        _: 当前管理员用户
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当凭证数据无效时抛出400错误
+    """
     try:
         upsert_google_app_cred(app_credentials, DocumentSource.GMAIL)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return StatusResponse(
-        success=True, message="Successfully saved Google App Credentials"
+        success=True, 
+        message="Successfully saved Google App Credentials" # 成功保存Google应用凭证
     )
-
-
 @router.delete("/admin/connector/gmail/app-credential")
 def delete_google_app_gmail_credentials(
     _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    删除Gmail应用凭证
+    
+    Args:
+        _: 当前管理员用户
+        db_session: 数据库会话
+    
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当删除失败时抛出400错误
+    """
     try:
         delete_google_app_cred(DocumentSource.GMAIL)
         cleanup_gmail_credentials(db_session=db_session)
@@ -163,14 +212,26 @@ def delete_google_app_gmail_credentials(
         raise HTTPException(status_code=400, detail=str(e))
 
     return StatusResponse(
-        success=True, message="Successfully deleted Google App Credentials"
+        success=True, 
+        message="Successfully deleted Google App Credentials" # 成功删除Google应用凭证
     )
-
 
 @router.get("/admin/connector/google-drive/app-credential")
 def check_google_app_credentials_exist(
     _: User = Depends(current_curator_or_admin_user),
 ) -> dict[str, str]:
+    """
+    检查Google Drive应用凭证是否存在
+    
+    Args:
+        _: 当前管理员或策展人用户
+        
+    Returns:
+        包含client_id的字典
+        
+    Raises:
+        HTTPException: 当找不到Google应用凭证时抛出404错误 
+    """
     try:
         return {
             "client_id": get_google_app_cred(DocumentSource.GOOGLE_DRIVE).web.client_id
@@ -183,6 +244,19 @@ def check_google_app_credentials_exist(
 def upsert_google_app_credentials(
     app_credentials: GoogleAppCredentials, _: User = Depends(current_admin_user)
 ) -> StatusResponse:
+    """
+    更新或插入Google Drive应用凭证
+    
+    Args:
+        app_credentials: Google Drive应用凭证数据
+        _: 当前管理员用户
+        
+    Returns:
+        状态响应对象
+        
+    Raises: 
+        HTTPException: 当凭证数据无效时抛出400错误
+    """
     try:
         upsert_google_app_cred(app_credentials, DocumentSource.GOOGLE_DRIVE)
     except ValueError as e:
@@ -198,6 +272,19 @@ def delete_google_app_credentials(
     _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    删除Google Drive应用凭证
+    
+    Args:
+        _: 当前管理员用户 
+        db_session: 数据库会话
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当删除失败时抛出400错误
+    """
     try:
         delete_google_app_cred(DocumentSource.GOOGLE_DRIVE)
         cleanup_google_drive_credentials(db_session=db_session)
@@ -213,6 +300,18 @@ def delete_google_app_credentials(
 def check_google_service_gmail_account_key_exist(
     _: User = Depends(current_curator_or_admin_user),
 ) -> dict[str, str]:
+    """
+    检查Gmail服务账号密钥是否存在
+    
+    Args:
+        _: 当前管理员或策展人用户
+        
+    Returns:
+        包含service_account_email的字典
+        
+    Raises:
+        HTTPException: 当找不到服务账号密钥时抛出404错误
+    """
     try:
         return {
             "service_account_email": get_service_account_key(
@@ -221,7 +320,7 @@ def check_google_service_gmail_account_key_exist(
         }
     except KvKeyNotFoundError:
         raise HTTPException(
-            status_code=404, detail="Google Service Account Key not found"
+            status_code=404, detail="Google Service Account Key not found" # Google服务账号密钥未找到
         )
 
 
@@ -229,6 +328,19 @@ def check_google_service_gmail_account_key_exist(
 def upsert_google_service_gmail_account_key(
     service_account_key: GoogleServiceAccountKey, _: User = Depends(current_admin_user)
 ) -> StatusResponse:
+    """
+    更新或插入Gmail服务账号密钥
+    
+    Args:
+        service_account_key: 服务账号密钥数据
+        _: 当前管理员用户
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当密钥数据无效时抛出400错误 
+    """
     try:
         upsert_service_account_key(service_account_key, DocumentSource.GMAIL)
     except ValueError as e:
@@ -259,6 +371,18 @@ def delete_google_service_gmail_account_key(
 def check_google_service_account_key_exist(
     _: User = Depends(current_curator_or_admin_user),
 ) -> dict[str, str]:
+    """
+    检查Google Drive服务账号密钥是否存在
+    
+    Args:
+        _: 当前管理员或策展人用户
+        
+    Returns:
+        包含服务账号邮箱的字典
+        
+    Raises:
+        HTTPException: 当找不到Google服务账号密钥时抛出404错误
+    """
     try:
         return {
             "service_account_email": get_service_account_key(
@@ -267,7 +391,7 @@ def check_google_service_account_key_exist(
         }
     except KvKeyNotFoundError:
         raise HTTPException(
-            status_code=404, detail="Google Service Account Key not found"
+            status_code=404, detail="Google Service Account Key not found" # Google服务账号密钥未找到
         )
 
 
@@ -275,13 +399,27 @@ def check_google_service_account_key_exist(
 def upsert_google_service_account_key(
     service_account_key: GoogleServiceAccountKey, _: User = Depends(current_admin_user)
 ) -> StatusResponse:
+    """
+    更新或插入Google Drive服务账号密钥
+    
+    Args:
+        service_account_key: 服务账号密钥数据
+        _: 当前管理员用户
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当密钥数据无效时抛出400错误
+    """
     try:
         upsert_service_account_key(service_account_key, DocumentSource.GOOGLE_DRIVE)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return StatusResponse(
-        success=True, message="Successfully saved Google Service Account Key"
+        success=True, 
+        message="Successfully saved Google Service Account Key" # 成功保存Google服务账号密钥
     )
 
 
@@ -307,9 +445,24 @@ def upsert_service_account_credential(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> ObjectCreationIdResponse:
-    """Special API which allows the creation of a credential for a service account.
+    """
+    为服务账号创建凭证的特殊API。
+    将输入与保存的服务账号密钥组合以在"Credential"表中创建条目。
+    Special API which allows the creation of a credential for a service account.
     Combines the input with the saved service account key to create an entry in the
-    `Credential` table."""
+    `Credential` table.
+    
+    Args:
+        service_account_credential_request: 服务账号凭证请求数据
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        
+    Returns:
+        对象创建ID响应
+        
+    Raises:
+        HTTPException: 当无法获取服务账号密钥时抛出400错误
+    """
     try:
         credential_base = build_service_account_creds(
             DocumentSource.GOOGLE_DRIVE,
@@ -333,9 +486,24 @@ def upsert_gmail_service_account_credential(
     user: User | None = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> ObjectCreationIdResponse:
-    """Special API which allows the creation of a credential for a service account.
+    """
+    为Gmail服务账号创建凭证的特殊API。
+    将输入与保存的服务账号密钥组合以在"Credential"表中创建条目。
+    Special API which allows the creation of a credential for a service account.
     Combines the input with the saved service account key to create an entry in the
-    `Credential` table."""
+    `Credential` table.
+    
+    Args:
+        service_account_credential_request: Gmail服务账号凭证请求数据  
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        
+    Returns:
+        对象创建ID响应
+        
+    Raises:
+        HTTPException: 当无法获取服务账号密钥时抛出400错误
+    """
     try:
         credential_base = build_service_account_creds(
             DocumentSource.GMAIL,
@@ -359,6 +527,17 @@ def check_drive_tokens(
     user: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> AuthStatus:
+    """
+    检查Google Drive令牌的有效性
+    
+    Args:
+        credential_id: 凭证ID
+        user: 当前管理员用户
+        db_session: 数据库会话
+        
+    Returns:
+        认证状态对象
+    """
     db_credentials = fetch_credential_by_id(credential_id, user, db_session)
     if (
         not db_credentials
@@ -381,6 +560,20 @@ def upload_files(
     _: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> FileUploadResponse:
+    """
+    上传文件的处理函数
+    
+    Args:
+        files: 要上传的文件列表
+        _: 当前管理员或策展人用户
+        db_session: 数据库会话
+        
+    Returns:
+        文件上传响应对象,包含文件路径
+        
+    Raises:
+        HTTPException: 当文件名为空或上传失败时抛出400错误
+    """
     for file in files:
         if not file.filename:
             raise HTTPException(status_code=400, detail="File name cannot be empty")
@@ -398,6 +591,7 @@ def upload_files(
                 file_type=file.content_type or "text/plain",
             )
 
+            # 如果是Word文档则转换为txt
             if file.content_type and file.content_type.startswith(
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             ):
@@ -418,11 +612,23 @@ def get_currently_failed_indexing_status(
         False, description="If true, return editable document sets"
     ),
 ) -> list[FailedConnectorIndexingStatus]:
-    # Get the latest failed indexing attempts
+    """
+    获取当前失败的连接器索引状态
+    
+    Args:
+        secondary_index: 是否使用次要索引
+        user: 当前管理员或策展人用户  
+        db_session: 数据库会话
+        get_editable: 是否获取可编辑的文档集
+        
+    Returns:
+        失败的连接器索引状态列表
+    """
+    # 获取最新的失败索引尝试
     latest_failed_indexing_attempts = get_latest_index_attempts_by_status(
         secondary_index=secondary_index,
         db_session=db_session,
-        status=IndexingStatus.FAILED,
+        status=IndexingStatus.FAILED,  
     )
 
     # Get the latest successful indexing attempts
@@ -471,7 +677,7 @@ def get_currently_failed_indexing_status(
 
     for cc_pair in cc_pairs:
         # Skip DefaultCCPair
-        if cc_pair.name == "DefaultCCPair":
+        if (cc_pair.name == "DefaultCCPair"):
             continue
 
         latest_index_attempt = cc_pair_to_latest_index_attempt.get(cc_pair.id)
@@ -507,6 +713,23 @@ def get_connector_indexing_status(
     ),
     tenant_id: str | None = Depends(get_current_tenant_id),
 ) -> list[ConnectorIndexingStatus]:
+    """
+    获取连接器的索引状态
+    
+    Args:
+        secondary_index: 是否使用次要索引  
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        get_editable: 是否获取可编辑的文档集
+        tenant_id: 租户ID
+        
+    Returns:
+        连接器索引状态列表
+        
+    Notes:
+        如果连接器正在后台删除,访问cc_pairs可能不一致,connector或credential可能为None。
+        需要额外检查以确保连接器和凭证仍然存在。
+    """
     indexing_statuses: list[ConnectorIndexingStatus] = []
 
     # NOTE: If the connector is deleting behind the scenes,
@@ -655,6 +878,15 @@ def get_connector_indexing_status(
 
 
 def _validate_connector_allowed(source: DocumentSource) -> None:
+    """
+    验证连接器类型是否允许使用
+    
+    Args:
+        source: 文档源类型
+        
+    Raises:
+        ValueError: 当连接器类型被禁用时抛出
+    """
     valid_connectors = [
         x for x in ENABLED_CONNECTOR_TYPES.replace("_", "").split(",") if x
     ]
@@ -665,8 +897,8 @@ def _validate_connector_allowed(source: DocumentSource) -> None:
             return
 
     raise ValueError(
-        "This connector type has been disabled by your system admin. "
-        "Please contact them to get it enabled if you wish to use it."
+        "This connector type has been disabled by your system admin. "  # 此连接器类型已被系统管理员禁用
+        "Please contact them to get it enabled if you wish to use it." # 如果您想使用它,请联系管理员启用
     )
 
 
@@ -716,6 +948,21 @@ def create_connector_with_mock_credential(
     db_session: Session = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant_id),
 ) -> StatusResponse:
+    """
+    创建带有模拟凭证的连接器
+    
+    Args:
+        connector_data: 连接器更新请求数据
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当创建失败时抛出400错误
+    """
     fetch_ee_implementation_or_noop(
         "onyx.db.user_group", "validate_object_creation_for_user", None
     )(
@@ -774,6 +1021,21 @@ def update_connector_from_model(
     user: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> ConnectorSnapshot | StatusResponse[int]:
+    """
+    根据模型更新连接器
+    
+    Args:
+        connector_id: 连接器ID
+        connector_data: 连接器更新数据
+        user: 当前管理员或策展人用户
+        db_session: 数据库会话
+        
+    Returns:
+        连接器快照或状态响应对象
+        
+    Raises:
+        HTTPException: 当连接器不存在时抛出404错误,当更新数据无效时抛出400错误
+    """
     try:
         _validate_connector_allowed(connector_data.source)
         fetch_ee_implementation_or_noop(
@@ -818,6 +1080,20 @@ def delete_connector_by_id(
     _: User = Depends(current_curator_or_admin_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse[int]:
+    """
+    删除指定ID的连接器
+    
+    Args:
+        connector_id: 要删除的连接器ID
+        _: 当前管理员或策展人用户
+        db_session: 数据库会话
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当连接器不可删除时抛出400错误
+    """
     try:
         with db_session.begin():
             return delete_connector(
@@ -835,9 +1111,22 @@ def connector_run_once(
     db_session: Session = Depends(get_session),
     tenant_id: str = Depends(get_current_tenant_id),
 ) -> StatusResponse[int]:
-    """Used to trigger indexing on a set of cc_pairs associated with a
-    single connector."""
-
+    """
+    触发连接器相关的cc_pairs的索引
+    Used to trigger indexing on a set of cc_pairs associated with a single connector.
+    
+    Args:
+        run_info: 运行连接器的请求数据
+        _: 当前管理员或策展人用户
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当连接器不存在时抛出404错误,当凭证无效时抛出400错误
+    """
     connector_id = run_info.connector_id
     specified_credential_ids = run_info.credential_ids
 
@@ -926,9 +1215,22 @@ def connector_run_once(
 
 @router.get("/connector/gmail/authorize/{credential_id}")
 def gmail_auth(
-    response: Response, credential_id: str, _: User = Depends(current_user)
+    response: Response, 
+    credential_id: str, 
+    _: User = Depends(current_user)
 ) -> AuthUrl:
-    # set a cookie that we can read in the callback (used for `verify_csrf`)
+    """
+    Gmail授权端点
+    
+    Args:
+        response: HTTP响应对象
+        credential_id: 凭证ID
+        _: 当前用户
+        
+    Returns:
+        包含授权URL的对象
+    """
+    # 设置cookie用于回调时的CSRF验证
     response.set_cookie(
         key=_GMAIL_CREDENTIAL_ID_COOKIE_NAME,
         value=credential_id,
@@ -940,18 +1242,29 @@ def gmail_auth(
 
 @router.get("/connector/google-drive/authorize/{credential_id}")
 def google_drive_auth(
-    response: Response, credential_id: str, _: User = Depends(current_user)
+    response: Response, 
+    credential_id: str, 
+    _: User = Depends(current_user)
 ) -> AuthUrl:
-    # set a cookie that we can read in the callback (used for `verify_csrf`)
+    """
+    Google Drive授权端点
+    
+    Args:
+        response: HTTP响应对象
+        credential_id: 凭证ID 
+        _: 当前用户
+        
+    Returns:
+        包含授权URL的对象
+    """
+    # 设置cookie用于回调时的CSRF验证
     response.set_cookie(
         key=_GOOGLE_DRIVE_CREDENTIAL_ID_COOKIE_NAME,
         value=credential_id,
         httponly=True,
         max_age=600,
     )
-    return AuthUrl(
-        auth_url=get_auth_url(int(credential_id), DocumentSource.GOOGLE_DRIVE)
-    )
+    return AuthUrl(auth_url=get_auth_url(int(credential_id), DocumentSource.GOOGLE_DRIVE))
 
 
 @router.get("/connector/gmail/callback")
@@ -961,10 +1274,26 @@ def gmail_callback(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    Gmail授权回调处理
+    
+    Args:
+        request: HTTP请求对象
+        callback: Gmail回调数据
+        user: 当前用户
+        db_session: 数据库会话
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当CSRF验证失败时抛出401错误,获取访问令牌失败时抛出500错误
+    """
     credential_id_cookie = request.cookies.get(_GMAIL_CREDENTIAL_ID_COOKIE_NAME)
     if credential_id_cookie is None or not credential_id_cookie.isdigit():
         raise HTTPException(
-            status_code=401, detail="Request did not pass CSRF verification."
+            status_code=401, 
+            detail="Request did not pass CSRF verification." # 请求未通过CSRF验证
         )
     credential_id = int(credential_id_cookie)
     verify_csrf(credential_id, callback.state)
@@ -986,10 +1315,26 @@ def google_drive_callback(
     user: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> StatusResponse:
+    """
+    Google Drive授权回调处理
+    
+    Args:
+        request: HTTP请求对象  
+        callback: Google Drive回调数据
+        user: 当前用户
+        db_session: 数据库会话
+        
+    Returns:
+        状态响应对象
+        
+    Raises:
+        HTTPException: 当CSRF验证失败时抛出401错误,获取访问令牌失败时抛出500错误
+    """
     credential_id_cookie = request.cookies.get(_GOOGLE_DRIVE_CREDENTIAL_ID_COOKIE_NAME)
     if credential_id_cookie is None or not credential_id_cookie.isdigit():
         raise HTTPException(
-            status_code=401, detail="Request did not pass CSRF verification."
+            status_code=401, 
+            detail="Request did not pass CSRF verification." # 请求未通过CSRF验证
         )
     credential_id = int(credential_id_cookie)
     verify_csrf(credential_id, callback.state)
@@ -1010,13 +1355,22 @@ def get_connectors(
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[ConnectorSnapshot]:
+    """
+    获取所有连接器列表
+    
+    Args:
+        _: 当前用户
+        db_session: 数据库会话
+        
+    Returns:
+        连接器快照列表,不包括INGESTION_API类型的连接器
+    """
     connectors = fetch_connectors(db_session)
     return [
         ConnectorSnapshot.from_connector_db_model(connector)
         for connector in connectors
-        # don't include INGESTION_API, as it's not a "real"
-        # connector like those created by the user
-        if connector.source != DocumentSource.INGESTION_API
+        # 不包括INGESTION_API,因为它不是用户创建的"真实"连接器
+        if connector.source != DocumentSource.INGESTION_API 
     ]
 
 
@@ -1026,6 +1380,20 @@ def get_connector_by_id(
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ConnectorSnapshot | StatusResponse[int]:
+    """
+    根据ID获取连接器
+    
+    Args:
+        connector_id: 连接器ID
+        _: 当前用户
+        db_session: 数据库会话
+        
+    Returns:
+        连接器快照或状态响应对象
+        
+    Raises:
+        HTTPException: 当连接器不存在时抛出404错误
+    """
     connector = fetch_connector_by_id(connector_id, db_session)
     if connector is None:
         raise HTTPException(
@@ -1050,6 +1418,13 @@ def get_connector_by_id(
 
 
 class BasicCCPairInfo(BaseModel):
+    """
+    基本连接器-凭证对信息模型
+    
+    Attributes:
+        has_successful_run: 是否有成功运行的记录
+        source: 文档源类型
+    """
     has_successful_run: bool
     source: DocumentSource
 
@@ -1059,7 +1434,18 @@ def get_basic_connector_indexing_status(
     _: User = Depends(current_chat_accesssible_user),
     db_session: Session = Depends(get_session),
 ) -> list[BasicCCPairInfo]:
+    """
+    获取基本连接器索引状态
+    
+    Args:
+        _: 当前可访问聊天的用户
+        db_session: 数据库会话
+        
+    Returns:
+        基本连接器-凭证对信息列表
+    """
     cc_pairs = get_connector_credential_pairs(db_session, eager_load_connector=True)
+    # 过滤掉INGESTION_API类型的连接器
     return [
         BasicCCPairInfo(
             has_successful_run=cc_pair.last_successful_index_time is not None,

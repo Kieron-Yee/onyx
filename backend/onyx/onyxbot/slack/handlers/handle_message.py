@@ -1,3 +1,9 @@
+"""
+此文件主要用于处理Slack消息的核心逻辑。
+包含了消息确认、反馈提醒、消息处理等主要功能。
+负责处理用户在Slack中发送的各类消息,并根据配置决定如何响应。
+"""
+
 import datetime
 
 from slack_sdk import WebClient
@@ -28,6 +34,14 @@ logger_base = setup_logger()
 
 
 def send_msg_ack_to_user(details: SlackMessageInfo, client: WebClient) -> None:
+    """
+    向用户发送消息确认。
+    如果是机器人消息,则在线程中回复;如果是普通消息,则添加表情反应。
+
+    参数:
+        details: Slack消息的详细信息
+        client: Slack Web客户端实例
+    """
     if details.is_bot_msg and details.sender:
         respond_in_thread(
             client=client,
@@ -50,6 +64,18 @@ def send_msg_ack_to_user(details: SlackMessageInfo, client: WebClient) -> None:
 def schedule_feedback_reminder(
     details: SlackMessageInfo, include_followup: bool, client: WebClient
 ) -> str | None:
+    """
+    安排发送反馈提醒消息。
+    
+    参数:
+        details: Slack消息的详细信息
+        include_followup: 是否包含后续跟进
+        client: Slack Web客户端实例
+    
+    返回:
+        str: 计划消息ID
+        None: 如果安排失败
+    """
     logger = setup_logger(extra={SLACK_CHANNEL_ID: details.channel_to_respond})
 
     if not DANSWER_BOT_FEEDBACK_REMINDER:
@@ -90,6 +116,14 @@ def schedule_feedback_reminder(
 def remove_scheduled_feedback_reminder(
     client: WebClient, channel: str | None, msg_id: str
 ) -> None:
+    """
+    删除已安排的反馈提醒消息。
+    
+    参数:
+        client: Slack Web客户端实例
+        channel: 频道ID
+        msg_id: 要删除的消息ID
+    """
     logger = setup_logger(extra={SLACK_CHANNEL_ID: channel})
 
     try:
@@ -111,12 +145,32 @@ def handle_message(
     feedback_reminder_id: str | None,
     tenant_id: str | None,
 ) -> bool:
-    """Potentially respond to the user message depending on filters and if an answer was generated
-
-    Returns True if need to respond with an additional message to the user(s) after this
-    function is finished. True indicates an unexpected failure that needs to be communicated
-    Query thrown out by filters due to config does not count as a failure that should be notified
-    Onyx failing to answer/retrieve docs does count and should be notified
+    """
+    处理用户消息,根据过滤器和是否生成答案来决定是否响应。
+    
+    参数:
+        message_info: Slack消息信息
+        slack_channel_config: Slack频道配置
+        client: Slack Web客户端实例
+        feedback_reminder_id: 反馈提醒ID
+        tenant_id: 租户ID
+        
+    返回:
+        bool: True表示需要在此函数完成后向用户发送额外消息
+             False表示不需要额外消息
+    
+    # Potentially respond to the user message depending on filters and if an answer was generated
+    # 根据过滤器和是否生成答案来决定是否响应用户消息
+    
+    # Returns True if need to respond with an additional message to the user(s) after this
+    # function is finished. True indicates an unexpected failure that needs to be communicated
+    # 如果在此函数完成后需要向用户发送额外消息则返回True。True表示需要通知的意外失败
+    
+    # Query thrown out by filters due to config does not count as a failure that should be notified
+    # 由于配置而被过滤器丢弃的查询不计为需要通知的失败
+    
+    # Onyx failing to answer/retrieve docs does count and should be notified
+    # Onyx无法回答/检索文档确实应该被通知
     """
     channel = message_info.channel_to_respond
 

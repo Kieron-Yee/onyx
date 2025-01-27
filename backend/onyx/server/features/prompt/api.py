@@ -1,3 +1,11 @@
+"""
+此文件实现了提示词(Prompt)相关的API路由处理。
+主要功能包括：
+- 创建、更新、删除和获取提示词
+- 提示词列表的获取
+- 提示词与用户关联的处理
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -19,6 +27,7 @@ from onyx.utils.logger import setup_logger
 
 # Note: As prompts are fairly innocuous/harmless, there are no protections
 # to prevent users from messing with prompts of other users.
+# 注：由于提示词相对无害，因此没有设置防止用户修改其他用户提示词的保护机制。
 
 logger = setup_logger()
 
@@ -31,6 +40,18 @@ def create_update_prompt(
     user: User | None,
     db_session: Session,
 ) -> PromptSnapshot:
+    """
+    创建或更新提示词的核心函数
+    
+    参数:
+        prompt_id: 提示词ID，如果是新建则为None
+        create_prompt_request: 创建提示词的请求数据
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        PromptSnapshot: 提示词快照对象
+    """
     personas = (
         list(
             get_personas_by_ids(
@@ -63,6 +84,21 @@ def create_prompt(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> PromptSnapshot:
+    """
+    创建新的提示词
+    
+    参数:
+        create_prompt_request: 创建提示词的请求数据
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        PromptSnapshot: 新创建的提示词快照
+    
+    异常:
+        HTTP 400: 创建失败，提供的信息无效
+        HTTP 500: 服务器内部错误
+    """
     try:
         return create_update_prompt(
             prompt_id=None,
@@ -91,6 +127,22 @@ def update_prompt(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> PromptSnapshot:
+    """
+    更新现有的提示词
+    
+    参数:
+        prompt_id: 要更新的提示词ID
+        update_prompt_request: 更新提示词的请求数据
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        PromptSnapshot: 更新后的提示词快照
+    
+    异常:
+        HTTP 400: 更新失败，提供的信息无效
+        HTTP 500: 服务器内部错误
+    """
     try:
         return create_update_prompt(
             prompt_id=prompt_id,
@@ -118,6 +170,14 @@ def delete_prompt(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除指定的提示词
+    
+    参数:
+        prompt_id: 要删除的提示词ID
+        user: 当前用户对象
+        db_session: 数据库会话
+    """
     mark_prompt_as_deleted(
         prompt_id=prompt_id,
         user=user,
@@ -130,6 +190,16 @@ def list_prompts(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[PromptSnapshot]:
+    """
+    获取提示词列表
+    
+    参数:
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        list[PromptSnapshot]: 提示词快照列表
+    """
     user_id = user.id if user is not None else None
     return [
         PromptSnapshot.from_model(prompt)
@@ -143,6 +213,17 @@ def get_prompt(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> PromptSnapshot:
+    """
+    获取指定ID的提示词
+    
+    参数:
+        prompt_id: 提示词ID
+        user: 当前用户对象
+        db_session: 数据库会话
+    
+    返回:
+        PromptSnapshot: 提示词快照对象
+    """
     return PromptSnapshot.from_model(
         get_prompt_by_id(
             prompt_id=prompt_id,

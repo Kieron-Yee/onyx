@@ -1,3 +1,12 @@
+"""
+文件功能说明：
+这个模块实现了文档索引流水线的核心功能。主要负责：
+1. 文档的批量处理和索引
+2. 文档的分块和嵌入向量生成
+3. 文档访问权限的管理
+4. 数据库操作的协调
+"""
+
 import traceback
 from collections.abc import Callable
 from functools import partial
@@ -50,17 +59,37 @@ logger = setup_logger()
 
 
 class DocumentBatchPrepareContext(BaseModel):
+    """
+    文档批处理上下文类，用于存储待更新的文档列表和数据库文档映射
+    
+    属性：
+        updatable_docs: 需要更新的文档列表
+        id_to_db_doc_map: 文档ID到数据库文档对象的映射字典
+    """
     updatable_docs: list[Document]
     id_to_db_doc_map: dict[str, DBDocument]
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class IndexingPipelineProtocol(Protocol):
+    """
+    索引流水线协议类，定义了文档批量索引的接口
+    """
     def __call__(
         self,
         document_batch: list[Document],
         index_attempt_metadata: IndexAttemptMetadata,
     ) -> tuple[int, int]:
+        """
+        处理文档批次的调用接口
+        
+        参数：
+            document_batch: 待处理的文档列表
+            index_attempt_metadata: 索引尝试的元数据
+            
+        返回：
+            tuple[int, int]: 返回(新文档数量, 块数量)的元组
+        """
         ...
 
 
@@ -69,7 +98,16 @@ def _upsert_documents_in_db(
     index_attempt_metadata: IndexAttemptMetadata,
     db_session: Session,
 ) -> None:
+    """
+    将文档信息更新或插入到数据库中
+    
+    参数：
+        documents: 需要处理的文档列表
+        index_attempt_metadata: 索引尝试的元数据
+        db_session: 数据库会话对象
+    """
     # Metadata here refers to basic document info, not metadata about the actual content
+    # 这里的元数据指基本文档信息，而不是实际内容的元数据
     document_metadata_list: list[DocumentMetadata] = []
     for doc in documents:
         first_link = next(
@@ -114,11 +152,19 @@ def _upsert_documents_in_db(
 def get_doc_ids_to_update(
     documents: list[Document], db_docs: list[DBDocument]
 ) -> list[Document]:
-    """Figures out which documents actually need to be updated. If a document is already present
-    and the `updated_at` hasn't changed, we shouldn't need to do anything with it.
-
-    NB: Still need to associate the document in the DB if multiple connectors are
-    indexing the same doc."""
+    """
+    确定需要更新的文档列表
+    
+    参数：
+        documents: 待检查的文档列表
+        db_docs: 数据库中已存在的文档列表
+        
+    返回：
+        需要更新的文档列表
+    
+    说明：
+        如果文档已存在且updated_at时间戳未发生变化，则不需要更新
+    """
     id_update_time_map = {
         doc.id: doc.doc_updated_at for doc in db_docs if doc.doc_updated_at
     }
@@ -148,6 +194,23 @@ def index_doc_batch_with_handler(
     ignore_time_skip: bool = False,
     tenant_id: str | None = None,
 ) -> tuple[int, int]:
+    """
+    文档批次索引处理函数，包含异常处理机制
+    
+    参数：
+        chunker: 文档分块器
+        embedder: 嵌入向量生成器
+        document_index: 文档索引对象
+        document_batch: 待处理的文档批次
+        index_attempt_metadata: 索引尝试的元数据
+        attempt_id: 尝试ID
+        db_session: 数据库会话对象
+        ignore_time_skip: 是否忽略时间跳过检查
+        tenant_id: 租户ID
+        
+    返回：
+        tuple[int, int]: 返回(新文档数量, 块数量)的元组
+    """
     r = (0, 0)
     try:
         r = index_doc_batch(
@@ -212,8 +275,18 @@ def index_doc_batch_prepare(
     db_session: Session,
     ignore_time_skip: bool = False,
 ) -> DocumentBatchPrepareContext | None:
-    """Sets up the documents in the relational DB (source of truth) for permissions, metadata, etc.
-    This preceeds indexing it into the actual document index."""
+    """
+    准备文档批次的索引工作
+    
+    参数：
+        documents: 待处理的文档列表
+        index_attempt_metadata: 索引尝试的元数据
+        db_session: 数据库会话对象
+        ignore_time_skip: 是否忽略时间跳过检查
+        
+    返回：
+        DocumentBatchPrepareContext | None: 返回文档批处理上下文对象或None
+    """
     # Create a trimmed list of docs that don't have a newer updated at
     # Shortcuts the time-consuming flow on connector index retries
     document_ids: list[str] = [document.id for document in documents]
@@ -261,6 +334,15 @@ def index_doc_batch_prepare(
 
 
 def filter_documents(document_batch: list[Document]) -> list[Document]:
+    """
+    过滤文档批次，移除无效或不符合条件的文档
+    
+    参数：
+        document_batch: 待过滤的文档列表
+        
+    返回：
+        过滤后的文档列表
+    """
     documents: list[Document] = []
     for document in document_batch:
         # Remove any NUL characters from title/semantic_id
@@ -334,13 +416,23 @@ def index_doc_batch(
     tenant_id: str | None = None,
     filter_fnc: Callable[[list[Document]], list[Document]] = filter_documents,
 ) -> tuple[int, int]:
-    """Takes different pieces of the indexing pipeline and applies it to a batch of documents
-    Note that the documents should already be batched at this point so that it does not inflate the
-    memory requirements
-
-    Returns a tuple where the first element is the number of new docs and the
-    second element is the number of chunks."""
-
+    """
+    处理文档批次并进行索引
+    
+    参数：
+        document_batch: 待处理的文档列表
+        chunker: 文档分块器
+        embedder: 嵌入向量生成器
+        document_index: 文档索引对象
+        index_attempt_metadata: 索引尝试的元数据
+        db_session: 数据库会话对象
+        ignore_time_skip: 是否忽略时间跳过检查
+        tenant_id: 租户ID
+        filter_fnc: 文档过滤函数
+        
+    返回：
+        tuple[int, int]: 返回(新文档数量, 块数量)的元组
+    """
     no_access = DocumentAccess.build(
         user_emails=[],
         user_groups=[],
@@ -370,8 +462,10 @@ def index_doc_batch(
     updatable_ids = [doc.id for doc in ctx.updatable_docs]
 
     # Acquires a lock on the documents so that no other process can modify them
+    # 获取文档锁，确保没有其他进程可以修改它们
     # NOTE: don't need to acquire till here, since this is when the actual race condition
     # with Vespa can occur.
+    # 注意：直到这里才需要获取锁，因为这是与Vespa可能发生竞争条件的时刻
     with prepare_to_modify_documents(db_session=db_session, document_ids=updatable_ids):
         doc_id_to_access_info = get_access_for_documents(
             document_ids=updatable_ids, db_session=db_session
@@ -404,9 +498,11 @@ def index_doc_batch(
 
         # we're concerned about race conditions where multiple simultaneous indexings might result
         # in one set of metadata overwriting another one in vespa.
+        # 我们担心多个同时索引可能导致一组元数据在vespa中覆盖另一组元数据的竞争条件。
         # we still write data here for the immediate and most likely correct sync, but
         # to resolve this, an update of the last modified field at the end of this loop
         # always triggers a final metadata sync via the celery queue
+        # 我们仍然在这里写入数据以进行即时且可能正确的同步，但为了解决这个问题，在循环结束时更新最后修改字段总是通过celery队列触发最终的元数据同步
         access_aware_chunks = [
             DocMetadataAwareIndexChunk.from_index_chunk(
                 index_chunk=chunk,
@@ -430,6 +526,7 @@ def index_doc_batch(
         # A document will not be spread across different batches, so all the
         # documents with chunks in this set, are fully represented by the chunks
         # in this set
+        # 一个文档不会分散在不同的批次中，因此该集合中具有块的所有文档都由该集合中的块完全表示
         insertion_records = document_index.index(
             chunks=access_aware_chunks,
             index_batch_params=IndexBatchParams(
@@ -451,6 +548,7 @@ def index_doc_batch(
             last_modified_ids.append(doc.id)
             # doc_updated_at is the source's idea (on the other end of the connector)
             # of when the doc was last modified
+            # doc_updated_at 是源端（连接器的另一端）认为文档最后修改的时间
             if doc.doc_updated_at is None:
                 continue
             ids_to_new_updated_at[doc.id] = doc.doc_updated_at
@@ -482,6 +580,16 @@ def index_doc_batch(
 def check_enable_large_chunks_and_multipass(
     embedder: IndexingEmbedder, db_session: Session
 ) -> tuple[bool, bool]:
+    """
+    检查是否启用大块和多遍索引
+    
+    参数：
+        embedder: 嵌入向量生成器
+        db_session: 数据库会话对象
+        
+    返回：
+        tuple[bool, bool]: 返回(是否启用多遍索引, 是否启用大块)的元组
+    """
     search_settings = get_current_search_settings(db_session)
     multipass = (
         search_settings.multipass_indexing
@@ -512,7 +620,22 @@ def build_indexing_pipeline(
     tenant_id: str | None = None,
     callback: IndexingHeartbeatInterface | None = None,
 ) -> IndexingPipelineProtocol:
-    """Builds a pipeline which takes in a list (batch) of docs and indexes them."""
+    """
+    构建索引流水线，处理文档批次并进行索引
+    
+    参数：
+        embedder: 嵌入向量生成器
+        document_index: 文档索引对象
+        db_session: 数据库会话对象
+        chunker: 文档分块器
+        ignore_time_skip: 是否忽略时间跳过检查
+        attempt_id: 尝试ID
+        tenant_id: 租户ID
+        callback: 索引心跳接口
+        
+    返回：
+        IndexingPipelineProtocol: 返回索引流水线协议对象
+    """
     multipass, enable_large_chunks = check_enable_large_chunks_and_multipass(
         embedder, db_session
     )
@@ -522,6 +645,7 @@ def build_indexing_pipeline(
         enable_multipass=multipass,
         enable_large_chunks=enable_large_chunks,
         # after every doc, update status in case there are a bunch of really long docs
+        # 在处理每个文档后更新状态，以防存在一批非常长的文档
         callback=callback,
     )
 

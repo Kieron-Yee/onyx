@@ -1,3 +1,11 @@
+"""
+该文件实现了嵌入模型管理的API接口。
+主要功能包括：
+1. 测试嵌入模型配置
+2. 列出可用的嵌入模型
+3. 管理嵌入提供商（添加、删除、查询）
+"""
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -26,6 +34,7 @@ from shared_configs.enums import EmbedTextType
 logger = setup_logger()
 
 
+# 创建管理员路由和基础路由
 admin_router = APIRouter(prefix="/admin/embedding")
 basic_router = APIRouter(prefix="/embedding")
 
@@ -35,6 +44,17 @@ def test_embedding_configuration(
     test_llm_request: TestEmbeddingRequest,
     _: User | None = Depends(current_admin_user),
 ) -> None:
+    """
+    测试嵌入模型配置的有效性
+    
+    Args:
+        test_llm_request: 测试请求参数，包含模型配置信息
+        _: 当前管理员用户（通过依赖注入）
+    
+    Raises:
+        ValueError: 当模型配置无效时抛出
+        HTTPException: 当测试过程中发生错误时抛出
+    """
     try:
         test_model = EmbeddingModel(
             server_host=MODEL_SERVER_HOST,
@@ -67,6 +87,16 @@ def list_embedding_models(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[EmbeddingModelDetail]:
+    """
+    获取所有可用的嵌入模型列表
+    
+    Args:
+        _: 当前管理员用户（通过依赖注入）
+        db_session: 数据库会话
+    
+    Returns:
+        list[EmbeddingModelDetail]: 嵌入模型详情列表
+    """
     search_settings = get_all_search_settings(db_session)
     return [EmbeddingModelDetail.from_db_model(setting) for setting in search_settings]
 
@@ -76,6 +106,16 @@ def list_embedding_providers(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[CloudEmbeddingProvider]:
+    """
+    获取所有已注册的嵌入提供商列表
+    
+    Args:
+        _: 当前管理员用户（通过依赖注入）
+        db_session: 数据库会话
+    
+    Returns:
+        list[CloudEmbeddingProvider]: 云端嵌入提供商列表
+    """
     return [
         CloudEmbeddingProvider.from_request(embedding_provider_model)
         for embedding_provider_model in fetch_existing_embedding_providers(db_session)
@@ -88,6 +128,17 @@ def delete_embedding_provider(
     _: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除指定类型的嵌入提供商
+    
+    Args:
+        provider_type: 提供商类型
+        _: 当前管理员用户（通过依赖注入）
+        db_session: 数据库会话
+    
+    Raises:
+        HTTPException: 当尝试删除当前活动的模型时抛出
+    """
     embedding_provider = get_current_db_embedding_provider(db_session=db_session)
     if (
         embedding_provider is not None
@@ -106,4 +157,15 @@ def put_cloud_embedding_provider(
     _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> CloudEmbeddingProvider:
+    """
+    创建或更新云端嵌入提供商
+    
+    Args:
+        provider: 提供商创建请求
+        _: 当前管理员用户（通过依赖注入）
+        db_session: 数据库会话
+    
+    Returns:
+        CloudEmbeddingProvider: 创建或更新后的云端嵌入提供商
+    """
     return upsert_cloud_embedding_provider(db_session, provider)

@@ -52,8 +52,8 @@ from shared_configs.contextvars import CURRENT_TENANT_ID_CONTEXTVAR
 
 logger = setup_logger()
 
-SYNC_DB_API = "psycopg2"
-ASYNC_DB_API = "asyncpg"
+SYNC_DB_API = "psycopg2"  # 为同步数据库引擎指定数据库 API
+ASYNC_DB_API = "asyncpg"  # 为异步数据库引擎指定数据库 API
 
 USE_IAM_AUTH = os.getenv("USE_IAM_AUTH", "False").lower() == "true"
 
@@ -63,7 +63,8 @@ SessionFactory: sessionmaker[Session] | None = None
 
 
 def create_ssl_context_if_iam() -> ssl.SSLContext | None:
-    """Create an SSL context if IAM authentication is enabled, else return None."""
+    """Create an SSL context if IAM authentication is enabled, else return None.
+    如果启用了 IAM 认证则创建 SSL 上下文，否则返回 None"""
     if USE_IAM_AUTH:
         return ssl.create_default_context(cafile=SSL_CERT_FILE)
     return None
@@ -77,6 +78,7 @@ def get_iam_auth_token(
 ) -> str:
     """
     Generate an IAM authentication token using boto3.
+    使用 boto3 生成 IAM 认证令牌
     """
     client = boto3.client("rds", region_name=region)
     token = client.generate_db_auth_token(
@@ -90,6 +92,7 @@ def configure_psycopg2_iam_auth(
 ) -> None:
     """
     Configure cparams for psycopg2 with IAM token and SSL.
+    为 psycopg2 配置 IAM 令牌和 SSL 参数
     """
     token = get_iam_auth_token(host, port, user, region)
     cparams["password"] = token
@@ -109,6 +112,7 @@ def build_connection_string(
     use_iam: bool = USE_IAM_AUTH,
     region: str = "us-west-2",
 ) -> str:
+    # 构建数据库连接字符串
     if use_iam:
         base_conn_str = f"postgresql+{db_api}://{user}@{host}:{port}/{db}"
     else:
@@ -170,6 +174,7 @@ if LOG_POSTGRES_CONN_COUNTS:
 
 
 def get_db_current_time(db_session: Session) -> datetime:
+    # 获取数据库当前时间
     result = db_session.execute(text("SELECT NOW()")).scalar()
     if result is None:
         raise ValueError("Database did not return a time")
@@ -180,10 +185,12 @@ SCHEMA_NAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def is_valid_schema_name(name: str) -> bool:
+    # 验证 schema 名称是否合法
     return SCHEMA_NAME_REGEX.match(name) is not None
 
 
 class SqlEngine:
+    """SQL引擎类，用于管理数据库连接"""
     _engine: Engine | None = None
     _lock: threading.Lock = threading.Lock()
     _app_name: str = POSTGRES_UNKNOWN_APP_NAME
@@ -196,6 +203,7 @@ class SqlEngine:
 
     @classmethod
     def _init_engine(cls, **engine_kwargs: Any) -> Engine:
+        # 初始化数据库引擎
         connection_string = build_connection_string(
             db_api=SYNC_DB_API, app_name=cls._app_name + "_sync", use_iam=USE_IAM_AUTH
         )
@@ -240,6 +248,11 @@ class SqlEngine:
 
 
 def get_all_tenant_ids() -> list[str] | list[None]:
+    """
+    获取所有租户ID列表。
+    如果未启用多租户模式，返回包含None的列表；
+    否则返回所有有效的租户ID。
+    """
     if not MULTI_TENANT:
         return [None]
     with get_session_with_tenant(tenant_id=POSTGRES_DEFAULT_SCHEMA) as session:
@@ -262,12 +275,14 @@ def get_all_tenant_ids() -> list[str] | list[None]:
 
 
 def get_sqlalchemy_engine() -> Engine:
+    """获取SQLAlchemy同步引擎实例"""
     return SqlEngine.get_engine()
 
 
 async def get_async_connection() -> Any:
     """
-    Custom connection function for async engine when using IAM auth.
+    获取异步数据库连接。
+    在使用IAM认证时，为异步引擎提供自定义连接函数。
     """
     host = POSTGRES_HOST
     port = POSTGRES_PORT
@@ -282,6 +297,10 @@ async def get_async_connection() -> Any:
 
 
 def get_sqlalchemy_async_engine() -> AsyncEngine:
+    """
+    获取或创建SQLAlchemy异步引擎实例。
+    如果引擎不存在则创建新的实例，否则返回现有实例。
+    """
     global _ASYNC_ENGINE
     if _ASYNC_ENGINE is None:
         app_name = SqlEngine.get_app_name() + "_async"
@@ -323,6 +342,10 @@ def get_sqlalchemy_async_engine() -> AsyncEngine:
 
 
 async def get_current_tenant_id(request: Request) -> str:
+    """
+    Get the current tenant ID from the request context.
+    从请求上下文中获取当前租户 ID
+    """
     if not MULTI_TENANT:
         tenant_id = POSTGRES_DEFAULT_SCHEMA
         CURRENT_TENANT_ID_CONTEXTVAR.set(tenant_id)
@@ -358,6 +381,10 @@ async def get_current_tenant_id(request: Request) -> str:
 async def get_async_session_with_tenant(
     tenant_id: str | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:
+    """
+    Generate an async database session for a specific tenant.
+    为特定租户生成异步数据库会话
+    """
     if tenant_id is None:
         tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
 
@@ -413,11 +440,17 @@ def get_session_with_tenant(
 ) -> Generator[Session, None, None]:
     """
     Generate a database session for a specific tenant.
+    为特定租户生成数据库会话
     This function:
+    此函数：
     1. Sets the database schema to the specified tenant's schema.
+       设置数据库 schema 为指定租户的 schema
     2. Preserves the tenant ID across the session.
+       在会话期间保持租户 ID
     3. Reverts to the previous tenant ID after the session is closed.
+       会话关闭后恢复到之前的租户 ID
     4. Uses the default schema if no tenant ID is provided.
+       如果未提供租户 ID 则使用默认 schema
     """
     engine = get_sqlalchemy_engine()
     previous_tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get() or POSTGRES_DEFAULT_SCHEMA
@@ -463,6 +496,10 @@ def get_session_with_tenant(
 def set_search_path_on_checkout(
     dbapi_conn: Any, connection_record: Any, connection_proxy: Any
 ) -> None:
+    """
+    在检出数据库连接时设置search_path。
+    根据当前租户ID设置正确的schema搜索路径。
+    """
     tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
     if tenant_id and is_valid_schema_name(tenant_id):
         with dbapi_conn.cursor() as cursor:
@@ -470,12 +507,20 @@ def set_search_path_on_checkout(
 
 
 def get_session_generator_with_tenant() -> Generator[Session, None, None]:
+    """
+    创建一个带有租户上下文的会话生成器。
+    使用当前租户ID创建新的数据库会话。
+    """
     tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
     with get_session_with_tenant(tenant_id) as session:
         yield session
 
 
 def get_session() -> Generator[Session, None, None]:
+    """
+    获取当前租户的数据库会话。
+    如果是多租户模式且使用默认schema，则要求用户先认证。
+    """
     tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
     if tenant_id == POSTGRES_DEFAULT_SCHEMA and MULTI_TENANT:
         raise BasicAuthenticationError(detail="User must authenticate")
@@ -491,6 +536,10 @@ def get_session() -> Generator[Session, None, None]:
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    获取异步数据库会话。
+    在多租户模式下会设置正确的schema搜索路径。
+    """
     tenant_id = CURRENT_TENANT_ID_CONTEXTVAR.get()
     engine = get_sqlalchemy_async_engine()
     async with AsyncSession(engine, expire_on_commit=False) as async_session:
@@ -502,11 +551,18 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 def get_session_context_manager() -> ContextManager[Session]:
-    """Context manager for database sessions."""
+    """
+    获取数据库会话的上下文管理器。
+    提供一个便捷的方式来管理数据库会话的生命周期。
+    """
     return contextlib.contextmanager(get_session_generator_with_tenant)()
 
 
 def get_session_factory() -> sessionmaker[Session]:
+    """
+    获取或创建会话工厂。
+    用于创建新的数据库会话实例。
+    """
     global SessionFactory
     if SessionFactory is None:
         SessionFactory = sessionmaker(bind=get_sqlalchemy_engine())
@@ -516,6 +572,10 @@ def get_session_factory() -> sessionmaker[Session]:
 async def warm_up_connections(
     sync_connections_to_warm_up: int = 20, async_connections_to_warm_up: int = 20
 ) -> None:
+    """
+    Warm up database connections by creating and testing them.
+    通过创建和测试连接来预热数据库连接池
+    """
     sync_postgres_engine = get_sqlalchemy_engine()
     connections = [
         sync_postgres_engine.connect() for _ in range(sync_connections_to_warm_up)
@@ -537,6 +597,10 @@ async def warm_up_connections(
 
 
 def provide_iam_token(dialect: Any, conn_rec: Any, cargs: Any, cparams: Any) -> None:
+    """
+    Provide IAM token for database connection authentication.
+    为数据库连接认证提供 IAM 令牌
+    """
     if USE_IAM_AUTH:
         host = POSTGRES_HOST
         port = POSTGRES_PORT

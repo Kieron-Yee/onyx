@@ -1,3 +1,7 @@
+"""
+此文件主要用于处理系统中的反馈相关功能，包括文档检索反馈和聊天消息反馈。
+主要实现了文档boost值的更新、文档可见性的控制、用户反馈的创建等功能。
+"""
 from datetime import datetime
 from datetime import timezone
 from uuid import UUID
@@ -31,7 +35,15 @@ from onyx.utils.logger import setup_logger
 
 logger = setup_logger()
 
-
+"""
+_fetch_db_doc_by_id 函数
+功能：通过文档ID从数据库中获取文档对象
+参数：
+    - doc_id: 文档ID
+    - db_session: 数据库会话
+返回：数据库文档对象
+异常：如果文档ID无效则抛出ValueError
+"""
 def _fetch_db_doc_by_id(doc_id: str, db_session: Session) -> DbDocument:
     stmt = select(DbDocument).where(DbDocument.id == doc_id)
     result = db_session.execute(stmt)
@@ -42,11 +54,20 @@ def _fetch_db_doc_by_id(doc_id: str, db_session: Session) -> DbDocument:
 
     return doc
 
-
+"""
+_add_user_filters 函数
+功能：为查询语句添加用户权限过滤条件
+参数：
+    - stmt: 原始查询语句
+    - user: 用户对象
+    - get_editable: 是否只获取可编辑的内容
+返回：添加了用户过滤条件的查询语句
+"""
 def _add_user_filters(
     stmt: Select, user: User | None, get_editable: bool = True
 ) -> Select:
     # If user is None, assume the user is an admin or auth is disabled
+    # 如果用户为空，假定用户是管理员或认证被禁用
     if user is None or user.role == UserRole.ADMIN:
         return stmt
 
@@ -59,6 +80,9 @@ def _add_user_filters(
     Here we select documents by relation:
     User -> User__UserGroup -> UserGroup__ConnectorCredentialPair ->
     ConnectorCredentialPair -> DocumentByConnectorCredentialPair -> Document
+    通过以下关系选择文档：
+    用户 -> 用户_用户组 -> 用户组_连接器凭证对 ->
+    连接器凭证对 -> 文档连接器凭证对 -> 文档
     """
     stmt = (
         stmt.outerjoin(DocByCC, DocByCC.id == DbDocument.id)
@@ -82,6 +106,12 @@ def _add_user_filters(
     that the user isn't a curator for
     - if we are not editing, we show all objects in the groups the user is a curator
     for (as well as public objects as well)
+
+    按以下条件过滤文档：
+    - 用户是否在拥有该对象的用户组中
+    - 如果用户不是全局策展人，他们必须与用户组有策展人关系
+    - 如果是编辑操作，我们还会过滤掉用户不是策展人的组所拥有的对象
+    - 如果不是编辑操作，我们显示用户是策展人的组中的所有对象（以及公共对象）
     """
     where_clause = User__UG.user_id == user.id
     if user.role == UserRole.CURATOR and get_editable:
@@ -99,7 +129,16 @@ def _add_user_filters(
 
     return stmt.where(where_clause)
 
-
+"""
+fetch_docs_ranked_by_boost 函数
+功能：获取按boost值排序的文档列表
+参数：
+    - db_session: 数据库会话
+    - user: 用户对象
+    - ascending: 是否升序排序
+    - limit: 限制返回的文档数量
+返回：排序后的文档列表
+"""
 def fetch_docs_ranked_by_boost(
     db_session: Session,
     user: User | None = None,
@@ -120,7 +159,16 @@ def fetch_docs_ranked_by_boost(
 
     return list(doc_list)
 
-
+"""
+update_document_boost 函数
+功能：更新文档的boost值
+参数：
+    - db_session: 数据库会话
+    - document_id: 文档ID
+    - boost: 新的boost值
+    - user: 用户对象
+异常：如果用户无权编辑文档则抛出HTTPException
+"""
 def update_document_boost(
     db_session: Session,
     document_id: str,
@@ -142,7 +190,17 @@ def update_document_boost(
     result.last_modified = datetime.now(timezone.utc)
     db_session.commit()
 
-
+"""
+update_document_hidden 函数
+功能：更新文档的隐藏状态
+参数：
+    - db_session: 数据库会话
+    - document_id: 文档ID
+    - hidden: 是否隐藏
+    - document_index: 文档索引对象
+    - user: 用户对象
+异常：如果用户无权编辑文档则抛出HTTPException
+"""
 def update_document_hidden(
     db_session: Session,
     document_id: str,
@@ -165,7 +223,18 @@ def update_document_hidden(
     result.last_modified = datetime.now(timezone.utc)
     db_session.commit()
 
-
+"""
+create_doc_retrieval_feedback 函数
+功能：创建文档检索反馈并更新文档的boost值
+参数：
+    - message_id: 消息ID
+    - document_id: 文档ID
+    - document_rank: 文档排名
+    - document_index: 文档索引对象
+    - db_session: 数据库会话
+    - clicked: 是否被点击
+    - feedback: 反馈类型
+"""
 def create_doc_retrieval_feedback(
     message_id: int,
     document_id: str,
@@ -210,7 +279,14 @@ def create_doc_retrieval_feedback(
     db_session.add(retrieval_feedback)
     db_session.commit()
 
-
+"""
+delete_document_feedback_for_documents__no_commit 函数
+功能：删除指定文档的所有反馈记录（不提交事务）
+参数：
+    - document_ids: 文档ID列表
+    - db_session: 数据库会话
+注意：此函数不会提交事务，用于更大的事务块中
+"""
 def delete_document_feedback_for_documents__no_commit(
     document_ids: list[str], db_session: Session
 ) -> None:
@@ -221,7 +297,19 @@ def delete_document_feedback_for_documents__no_commit(
     )
     db_session.execute(stmt)
 
-
+"""
+create_chat_message_feedback 函数
+功能：创建聊天消息的反馈
+参数：
+    - is_positive: 是否是正面反馈
+    - feedback_text: 反馈文本
+    - chat_message_id: 聊天消息ID
+    - user_id: 用户ID
+    - db_session: 数据库会话
+    - required_followup: 是否需要人工跟进
+    - predefined_feedback: 预定义的反馈
+异常：如果没有提供任何反馈内容或消息类型不正确则抛出ValueError
+"""
 def create_chat_message_feedback(
     is_positive: bool | None,
     feedback_text: str | None,

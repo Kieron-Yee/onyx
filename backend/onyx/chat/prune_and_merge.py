@@ -1,3 +1,11 @@
+"""
+该模块用于处理聊天上下文的修剪和合并操作。
+主要功能包括:
+1. 对文档段落进行智能修剪，确保符合token限制
+2. 合并相关的文档块
+3. 处理文档的相关性排序和重组
+"""
+
 import json
 from collections import defaultdict
 from copy import deepcopy
@@ -34,10 +42,22 @@ _OVERCOUNT_ESTIMATE = 256
 
 
 class PruningError(Exception):
+    """
+    修剪过程中的异常类
+    用于标识在修剪文档时遇到的错误情况
+    """
     pass
 
 
 class ChunkRange(BaseModel):
+    """
+    表示文档块范围的数据类
+    
+    属性:
+        chunks: 文档块列表
+        start: 开始位置
+        end: 结束位置
+    """
     chunks: list[InferenceChunk]
     start: int
     end: int
@@ -45,12 +65,24 @@ class ChunkRange(BaseModel):
 
 def merge_chunk_intervals(chunk_ranges: list[ChunkRange]) -> list[ChunkRange]:
     """
-    This acts on a single document to merge the overlapping ranges of chunks
-    Algo explained here for easy understanding: https://leetcode.com/problems/merge-intervals
+    合并单个文档中重叠的文档块范围
+    
+    # This acts on a single document to merge the overlapping ranges of chunks
+    # Algo explained here for easy understanding: https://leetcode.com/problems/merge-intervals
+    # 该函数作用于单个文档，合并重叠的块范围
+    # 算法解释参考: https://leetcode.com/problems/merge-intervals
 
-    NOTE: this is used to merge chunk ranges for retrieving the right chunk_ids against the
-    document index, this does not merge the actual contents so it should not be used to actually
-    merge chunks post retrieval.
+    # NOTE: this is used to merge chunk ranges for retrieving the right chunk_ids against the
+    # document index, this does not merge the actual contents so it should not be used to actually
+    # merge chunks post retrieval.
+    # 注意：这个函数用于合并块范围以从文档索引中检索正确的chunk_ids，
+    # 它不会合并实际内容，因此不应该用于检索后实际合并块
+
+    参数:
+        chunk_ranges: 待合并的文档块范围列表
+    
+    返回:
+        合并后的文档块范围列表
     """
     sorted_ranges = sorted(chunk_ranges, key=lambda x: x.start)
 
@@ -76,6 +108,21 @@ def _compute_limit(
     max_tokens: int | None,
     tool_token_count: int,
 ) -> int:
+    """
+    计算文档token的限制值
+    
+    参数:
+        prompt_config: 提示配置
+        llm_config: LLM配置
+        question: 用户问题
+        max_chunks: 最大块数
+        max_window_percentage: 最大窗口百分比
+        max_tokens: 最大token数
+        tool_token_count: 工具token数
+        
+    返回:
+        计算得到的token限制值
+    """
     llm_max_document_tokens = compute_max_document_tokens(
         prompt_config=prompt_config,
         llm_config=llm_config,
@@ -109,6 +156,16 @@ def reorder_sections(
     sections: list[InferenceSection],
     section_relevance_list: list[bool] | None,
 ) -> list[InferenceSection]:
+    """
+    重新排序文档段落，将相关性高的段落放在前面
+    
+    参数:
+        sections: 文档段落列表
+        section_relevance_list: 段落相关性列表
+    
+    返回:
+        重新排序后的文档段落列表
+    """
     if section_relevance_list is None:
         return sections
 
@@ -124,6 +181,15 @@ def reorder_sections(
 def _remove_sections_to_ignore(
     sections: list[InferenceSection],
 ) -> list[InferenceSection]:
+    """
+    移除标记为不用于QA的文档段落
+    
+    参数:
+        sections: 文档段落列表
+    
+    返回:
+        移除后的文档段落列表
+    """
     return [
         section
         for section in sections
@@ -140,6 +206,21 @@ def _apply_pruning(
     using_tool_message: bool,
     llm_config: LLMConfig,
 ) -> list[InferenceSection]:
+    """
+    应用修剪操作，确保文档段落符合token限制
+    
+    参数:
+        sections: 文档段落列表
+        section_relevance_list: 段落相关性列表
+        token_limit: token限制
+        is_manually_selected_docs: 是否手动选择文档
+        use_sections: 是否使用段落
+        using_tool_message: 是否使用工具消息
+        llm_config: LLM配置
+    
+    返回:
+        修剪后的文档段落列表
+    """
     llm_tokenizer = get_tokenizer(
         provider_type=llm_config.model_provider,
         model_name=llm_config.model_name,
@@ -268,6 +349,20 @@ def prune_sections(
     question: str,
     contextual_pruning_config: ContextualPruningConfig,
 ) -> list[InferenceSection]:
+    """
+    修剪文档段落，确保符合token限制
+    
+    参数:
+        sections: 文档段落列表
+        section_relevance_list: 段落相关性列表
+        prompt_config: 提示配置
+        llm_config: LLM配置
+        question: 用户问题
+        contextual_pruning_config: 上下文修剪配置
+    
+    返回:
+        修剪后的文档段落列表
+    """
     # Assumes the sections are score ordered with highest first
     if section_relevance_list is not None:
         assert len(sections) == len(section_relevance_list)
@@ -301,6 +396,15 @@ def prune_sections(
 
 
 def _merge_doc_chunks(chunks: list[InferenceChunk]) -> InferenceSection:
+    """
+    合并文档块为一个段落
+    
+    参数:
+        chunks: 文档块列表
+    
+    返回:
+        合并后的文档段落
+    """
     # Assuming there are no duplicates by this point
     sorted_chunks = sorted(chunks, key=lambda x: x.chunk_id)
 
@@ -328,6 +432,15 @@ def _merge_doc_chunks(chunks: list[InferenceChunk]) -> InferenceSection:
 
 
 def _merge_sections(sections: list[InferenceSection]) -> list[InferenceSection]:
+    """
+    合并文档段落
+    
+    参数:
+        sections: 文档段落列表
+    
+    返回:
+        合并后的文档段落列表
+    """
     docs_map: dict[str, dict[int, InferenceChunk]] = defaultdict(dict)
     doc_order: dict[str, int] = {}
     for index, section in enumerate(sections):
@@ -369,6 +482,20 @@ def prune_and_merge_sections(
     question: str,
     contextual_pruning_config: ContextualPruningConfig,
 ) -> list[InferenceSection]:
+    """
+    修剪并合并文档段落，确保符合token限制
+    
+    参数:
+        sections: 文档段落列表
+        section_relevance_list: 段落相关性列表
+        prompt_config: 提示配置
+        llm_config: LLM配置
+        question: 用户问题
+        contextual_pruning_config: 上下文修剪配置
+    
+    返回:
+        修剪并合并后的文档段落列表
+    """
     # Assumes the sections are score ordered with highest first
     remaining_sections = prune_sections(
         sections=sections,

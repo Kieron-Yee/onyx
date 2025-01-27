@@ -1,3 +1,12 @@
+"""
+该文件实现了工具响应处理器，主要用于处理AI对话过程中的工具调用响应。
+主要功能包括:
+1. 处理工具调用请求
+2. 执行工具调用
+3. 管理工具调用的生命周期
+4. 处理工具调用的结果
+"""
+
 from collections.abc import Generator
 
 from langchain_core.messages import AIMessageChunk
@@ -26,7 +35,28 @@ logger = setup_logger()
 
 
 class ToolResponseHandler:
+    """
+    工具响应处理器类
+    用于管理和处理AI对话中的工具调用响应流程
+
+    属性:
+        tools: 可用工具列表
+        tool_call_chunk: 工具调用的AI消息片段
+        tool_call_requests: 工具调用请求列表
+        tool_runner: 工具运行器实例
+        tool_call_summary: 工具调用摘要
+        tool_kickoff: 工具调用启动信息
+        tool_responses: 工具响应列表
+        tool_final_result: 工具调用最终结果
+    """
+
     def __init__(self, tools: list[Tool]):
+        """
+        初始化工具响应处理器
+        
+        参数:
+            tools: 可用的工具列表
+        """
         self.tools = tools
 
         self.tool_call_chunk: AIMessageChunk | None = None
@@ -43,8 +73,18 @@ class ToolResponseHandler:
     def get_tool_call_for_non_tool_calling_llm(
         cls, llm_call: LLMCall, llm: LLM
     ) -> tuple[Tool, dict] | None:
+        """
+        获取非工具调用LLM的工具调用信息
+        
+        参数:
+            llm_call: LLM调用对象
+            llm: LLM实例
+            
+        返回:
+            如果需要调用工具，返回(工具实例, 工具参数)的元组；否则返回None
+        """
         if llm_call.force_use_tool.force_use:
-            # if we are forcing a tool, we don't need to check which tools to run
+            # 如果强制使用工具，直接使用指定的工具
             tool = next(
                 (
                     t
@@ -74,6 +114,7 @@ class ToolResponseHandler:
 
             return (tool, tool_args)
         else:
+            # 检查并选择合适的工具
             tool_options = check_which_tools_should_run_for_non_tool_calling_llm(
                 tools=llm_call.tools,
                 query=llm_call.prompt_builder.raw_user_message,
@@ -106,6 +147,14 @@ class ToolResponseHandler:
             return chosen_tool_and_args
 
     def _handle_tool_call(self) -> Generator[ResponsePart, None, None]:
+        """
+        处理工具调用的内部方法
+        
+        生成器函数，用于处理工具调用的执行过程并生成相应的响应部分
+        
+        返回:
+            生成器，产生工具调用过程中的响应部分
+        """
         if not self.tool_call_chunk or not self.tool_call_chunk.tool_calls:
             return
 
@@ -160,6 +209,16 @@ class ToolResponseHandler:
         response_item: BaseMessage | None,
         previous_response_items: list[BaseMessage],
     ) -> Generator[ResponsePart, None, None]:
+        """
+        处理响应部分
+        
+        参数:
+            response_item: 当前响应消息
+            previous_response_items: 之前的响应消息列表
+            
+        返回:
+            生成器，产生处理后的响应部分
+        """
         if response_item is None:
             yield from self._handle_tool_call()
 
@@ -174,6 +233,15 @@ class ToolResponseHandler:
         return
 
     def next_llm_call(self, current_llm_call: LLMCall) -> LLMCall | None:
+        """
+        生成下一个LLM调用
+        
+        参数:
+            current_llm_call: 当前的LLM调用对象
+            
+        返回:
+            如果需要继续调用LLM，返回新的LLM调用对象；否则返回None
+        """
         if (
             self.tool_runner is None
             or self.tool_call_summary is None

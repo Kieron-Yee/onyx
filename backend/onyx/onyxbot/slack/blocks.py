@@ -1,7 +1,20 @@
+"""
+这个文件主要用于处理 Slack 消息块(blocks)的相关功能。
+主要包含:
+- 构建反馈提醒消息块
+- 构建文档反馈块
+- 构建问答响应块
+- 构建引用和来源块
+- 处理消息格式化和显示
+"""
+
+# 导入标准库
 from datetime import datetime
 
+# 导入第三方库
 import pytz
 import timeago  # type: ignore
+# Slack SDK相关导入
 from slack_sdk.models.blocks import ActionsBlock
 from slack_sdk.models.blocks import Block
 from slack_sdk.models.blocks import ButtonElement
@@ -14,6 +27,7 @@ from slack_sdk.models.blocks import SectionBlock
 from slack_sdk.models.blocks.basic_components import MarkdownTextObject
 from slack_sdk.models.blocks.block_elements import ImageElement
 
+# 内部模块导入
 from onyx.chat.models import ChatOnyxBotResponse
 from onyx.configs.app_configs import DISABLE_GENERATIVE_AI
 from onyx.configs.app_configs import WEB_DOMAIN
@@ -40,10 +54,21 @@ from onyx.onyxbot.slack.utils import remove_slack_text_interactions
 from onyx.onyxbot.slack.utils import translate_vespa_highlight_to_slack
 from onyx.utils.text_processing import decode_escapes
 
-_MAX_BLURB_LEN = 45
+# 定义文本块的最大长度
+_MAX_BLURB_LEN = 45  # 文档标题的最大显示长度
 
 
 def get_feedback_reminder_blocks(thread_link: str, include_followup: bool) -> Block:
+    """
+    构建反馈提醒消息块
+    
+    参数:
+        thread_link: 消息线程链接
+        include_followup: 是否包含后续跟进选项
+    
+    返回:
+        Block: Slack消息块对象
+    """
     text = (
         f"Please provide feedback on <{thread_link}|this answer>. "
         "This is essential to help us to improve the quality of the answers. "
@@ -58,6 +83,20 @@ def get_feedback_reminder_blocks(thread_link: str, include_followup: bool) -> Bl
 
 
 def _split_text(text: str, limit: int = 3000) -> list[str]:
+    """
+    将长文本按照指定长度限制分割成多个块
+    
+    参数:
+        text: 需要分割的文本
+        limit: 每个块的最大长度限制，默认3000字符
+        
+    返回:
+        list[str]: 分割后的文本块列表
+    
+    说明:
+        - 会在空格处进行分割，避免单词被截断
+        - 如果找不到合适的分割点，将强制在limit处分割
+    """
     if len(text) <= limit:
         return [text]
 
@@ -67,26 +106,45 @@ def _split_text(text: str, limit: int = 3000) -> list[str]:
             chunks.append(text)
             break
 
-        # Find the nearest space before the limit to avoid splitting a word
+        # 在限制长度之前找到最近的空格，以避免分割单词
         split_at = text.rfind(" ", 0, limit)
-        if split_at == -1:  # No spaces found, force split
+        if split_at == -1:  # 没有找到空格，强制分割
             split_at = limit
 
         chunk = text[:split_at]
         chunks.append(chunk)
-        text = text[split_at:].lstrip()  # Remove leading spaces from the next chunk
+        text = text[split_at:].lstrip()  # 删除下一个块的前导空格
 
     return chunks
 
 
 def _clean_markdown_link_text(text: str) -> str:
-    # Remove any newlines within the text
+    """
+    清理Markdown链接文本中的换行符
+    
+    参数:
+        text: 需要清理的文本
+    
+    返回:
+        str: 清理后的文本
+    """
+    # 删除文本中的所有换行符
     return text.replace("\n", " ").strip()
 
 
 def _build_qa_feedback_block(
     message_id: int, feedback_reminder_id: str | None = None
 ) -> Block:
+    """
+    构建问答反馈块，包含有用和无用两个按钮
+    
+    参数:
+        message_id: 消息ID
+        feedback_reminder_id: 反馈提醒ID
+        
+    返回:
+        Block: Slack消息块对象
+    """
     return ActionsBlock(
         block_id=build_feedback_id(message_id),
         elements=[
@@ -105,6 +163,12 @@ def _build_qa_feedback_block(
 
 
 def get_document_feedback_blocks() -> Block:
+    """
+    构建文档反馈块
+    
+    返回:
+        Block: Slack消息块对象
+    """
     return SectionBlock(
         text=(
             "- 'Up-Boost' if this document is a good source of information and should be "
@@ -137,6 +201,17 @@ def _build_doc_feedback_block(
     document_id: str,
     document_rank: int,
 ) -> ButtonElement:
+    """
+    构建文档反馈按钮
+    
+    参数:
+        message_id: 消息ID
+        document_id: 文档ID
+        document_rank: 文档排名
+        
+    返回:
+        ButtonElement: Slack按钮元素
+    """
     feedback_id = build_feedback_id(message_id, document_id, document_rank)
     return ButtonElement(
         action_id=FEEDBACK_DOC_BUTTON_BLOCK_ACTION_ID,
@@ -149,6 +224,16 @@ def get_restate_blocks(
     msg: str,
     is_bot_msg: bool,
 ) -> list[Block]:
+    """
+    构建重新陈述问题的消息块
+    
+    参数:
+        msg: 消息内容
+        is_bot_msg: 是否为机器人消息
+    
+    返回:
+        list[Block]: Slack消息块列表
+    """
     # Only the slash command needs this context because the user doesn't see their own input
     if not is_bot_msg:
         return []
@@ -164,6 +249,17 @@ def _build_documents_blocks(
     message_id: int | None,
     num_docs_to_display: int = DANSWER_BOT_NUM_DOCS_TO_DISPLAY,
 ) -> list[Block]:
+    """
+    构建文档消息块
+    
+    参数:
+        documents: 文档列表
+        message_id: 消息ID
+        num_docs_to_display: 显示的文档数量
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     header_text = (
         "Retrieved Documents" if DISABLE_GENERATIVE_AI else "Reference Documents"
     )
@@ -223,6 +319,16 @@ def _build_sources_blocks(
     cited_documents: list[tuple[int, SavedSearchDoc]],
     num_docs_to_display: int = DANSWER_BOT_NUM_DOCS_TO_DISPLAY,
 ) -> list[Block]:
+    """
+    构建引用和来源消息块
+    
+    参数:
+        cited_documents: 引用的文档列表
+        num_docs_to_display: 显示的文档数量
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     if not cited_documents:
         return [
             SectionBlock(
@@ -240,13 +346,11 @@ def _build_sources_blocks(
 
         doc_sem_id = d.semantic_identifier
         if d.source_type == DocumentSource.SLACK.value:
-            # for legacy reasons, before the switch to how Slack semantic identifiers are constructed
+            # 由于历史原因，在切换到Slack语义标识符的构造方式之前
             if "#" not in doc_sem_id:
                 doc_sem_id = "#" + doc_sem_id
 
-        # this is needed to try and prevent the line from overflowing
-        # if it does overflow, the image gets placed above the title and it
-        # looks bad
+        # 这是为了防止行溢出，如果溢出，图像会被放置在标题上方，看起来很糟糕
         doc_sem_id = (
             doc_sem_id[:_MAX_BLURB_LEN] + "..."
             if len(doc_sem_id) > _MAX_BLURB_LEN
@@ -298,6 +402,15 @@ def _build_sources_blocks(
 def _priority_ordered_documents_blocks(
     answer: ChatOnyxBotResponse,
 ) -> list[Block]:
+    """
+    构建优先排序的文档消息块
+    
+    参数:
+        answer: 聊天机器人的响应对象
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     docs_response = answer.docs if answer.docs else None
     top_docs = docs_response.top_documents if docs_response else []
     llm_doc_inds = answer.llm_selected_doc_indices or []
@@ -321,6 +434,15 @@ def _priority_ordered_documents_blocks(
 def _build_citations_blocks(
     answer: ChatOnyxBotResponse,
 ) -> list[Block]:
+    """
+    构建引用消息块
+    
+    参数:
+        answer: 聊天机器人的响应对象
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     docs_response = answer.docs if answer.docs else None
     top_docs = docs_response.top_documents if docs_response else []
     citations = answer.citations or []
@@ -341,9 +463,18 @@ def _build_citations_blocks(
 def _build_qa_response_blocks(
     answer: ChatOnyxBotResponse,
 ) -> list[Block]:
+    """
+    构建问答响应消息块
+    
+    参数:
+        answer: 聊天机器人的响应对象
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     retrieval_info = answer.docs
     if not retrieval_info:
-        # This should not happen, even with no docs retrieved, there is still info returned
+        # 这种情况不应该发生，即使没有检索到文档，仍然会返回信息
         raise RuntimeError("Failed to retrieve docs, cannot answer question.")
 
     if DISABLE_GENERATIVE_AI:
@@ -383,7 +514,7 @@ def _build_qa_response_blocks(
             )
         ]
     else:
-        # replaces markdown links with slack format links
+        # 将markdown链接替换为slack格式的链接
         formatted_answer = format_slack_message(answer.answer)
         answer_processed = decode_escapes(
             remove_slack_text_interactions(formatted_answer)
@@ -406,6 +537,16 @@ def _build_continue_in_web_ui_block(
     tenant_id: str | None,
     message_id: int | None,
 ) -> Block:
+    """
+    构建继续在Web UI中进行的消息块
+    
+    参数:
+        tenant_id: 租户ID
+        message_id: 消息ID
+        
+    返回:
+        Block: Slack消息块对象
+    """
     if message_id is None:
         raise ValueError("No message id provided to build continue in web ui block")
     with get_session_with_tenant(tenant_id) as db_session:
@@ -427,6 +568,15 @@ def _build_continue_in_web_ui_block(
 
 
 def _build_follow_up_block(message_id: int | None) -> ActionsBlock:
+    """
+    构建后续跟进消息块
+    
+    参数:
+        message_id: 消息ID
+        
+    返回:
+        ActionsBlock: Slack操作块对象
+    """
     return ActionsBlock(
         block_id=build_feedback_id(message_id) if message_id is not None else None,
         elements=[
@@ -447,6 +597,16 @@ def _build_follow_up_block(message_id: int | None) -> ActionsBlock:
 def build_follow_up_resolved_blocks(
     tag_ids: list[str], group_ids: list[str]
 ) -> list[Block]:
+    """
+    构建后续跟进已解决消息块
+    
+    参数:
+        tag_ids: 标签ID列表
+        group_ids: 组ID列表
+        
+    返回:
+        list[Block]: Slack消息块列表
+    """
     tag_str = " ".join([f"<@{tag}>" for tag in tag_ids])
     if tag_str:
         tag_str += " "
@@ -483,10 +643,24 @@ def build_slack_response_blocks(
     skip_ai_feedback: bool = False,
 ) -> list[Block]:
     """
+    构建完整的Slack响应块
     This function is a top level function that builds all the blocks for the Slack response.
     It also handles combining all the blocks together.
+    这个函数是一个顶层函数，用于构建Slack响应的所有块，并处理所有块的组合。
+    
+    参数:
+        answer: 聊天机器人的响应对象
+        tenant_id: 租户ID
+        message_info: Slack消息信息
+        channel_conf: 频道配置
+        use_citations: 是否使用引用
+        feedback_reminder_id: 反馈提醒ID
+        skip_ai_feedback: 是否跳过AI反馈
+        
+    返回:
+        list[Block]: Slack消息块列表
     """
-    # If called with the OnyxBot slash command, the question is lost so we have to reshow it
+    # 如果使用OnyxBot斜杠命令调用，问题会丢失，所以我们必须重新显示它
     restate_question_block = get_restate_blocks(
         message_info.thread_messages[-1].message, message_info.is_bot_msg
     )

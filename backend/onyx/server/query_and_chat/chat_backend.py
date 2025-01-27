@@ -1,3 +1,17 @@
+"""
+This file contains the API endpoints and logic for handling chat functionality, including:
+- Chat session management (create, update, delete)
+- Message handling and streaming
+- File upload and management for chat
+- Chat feedback handling
+
+此文件包含处理聊天功能的API端点和逻辑，包括：
+- 聊天会话管理(创建、更新、删除)
+- 消息处理和流式传输
+- 聊天文件上传和管理
+- 聊天反馈处理
+"""
+
 import asyncio
 import io
 import json
@@ -99,6 +113,16 @@ def get_user_chat_sessions(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ChatSessionsResponse:
+    """
+    获取指定用户的所有聊天会话列表
+    
+    参数:
+        user: 当前用户对象,可能为None
+        db_session: 数据库会话对象
+        
+    返回:
+        ChatSessionsResponse: 包含用户所有聊天会话信息的响应对象
+    """
     user_id = user.id if user is not None else None
 
     try:
@@ -107,13 +131,14 @@ def get_user_chat_sessions(
         )
 
     except ValueError:
-        raise ValueError("Chat session does not exist or has been deleted")
+        raise ValueError("Chat session does not exist or has been deleted") 
+        # 聊天会话不存在或已被删除
 
     return ChatSessionsResponse(
         sessions=[
             ChatSessionDetails(
                 id=chat.id,
-                name=chat.description,
+                name=chat.description, 
                 persona_id=chat.persona_id,
                 time_created=chat.time_created.isoformat(),
                 shared_status=chat.shared_status,
@@ -128,9 +153,20 @@ def get_user_chat_sessions(
 @router.put("/update-chat-session-model")
 def update_chat_session_model(
     update_thread_req: UpdateChatSessionThreadRequest,
-    user: User | None = Depends(current_user),
+    user: User | None = Depends(current_user), 
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新聊天会话使用的模型
+    
+    参数:
+        update_thread_req: 包含更新信息的请求对象
+        user: 当前用户对象,可能为None
+        db_session: 数据库会话对象
+        
+    返回:
+        None
+    """
     chat_session = get_chat_session_by_id(
         chat_session_id=update_thread_req.chat_session_id,
         user_id=user.id if user is not None else None,
@@ -149,6 +185,21 @@ def get_chat_session(
     user: User | None = Depends(current_chat_accesssible_user),
     db_session: Session = Depends(get_session),
 ) -> ChatSessionDetailResponse:
+    """
+    获取指定ID的聊天会话详情
+    
+    参数:
+        session_id: 聊天会话ID
+        is_shared: 是否是共享会话
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    返回:
+        ChatSessionDetailResponse: 包含聊天会话完整信息的响应对象
+        
+    异常:
+        ValueError: 当聊天会话不存在或已删除时抛出
+    """
     user_id = user.id if user is not None else None
     try:
         chat_session = get_chat_session_by_id(
@@ -204,6 +255,20 @@ def create_new_chat_session(
     user: User | None = Depends(current_chat_accesssible_user),
     db_session: Session = Depends(get_session),
 ) -> CreateChatSessionID:
+    """
+    创建新的聊天会话
+    
+    参数:
+        chat_session_creation_request: 创建聊天会话的请求数据
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    返回:
+        CreateChatSessionID: 包含新创建的聊天会话ID
+        
+    异常:
+        HTTPException: 当提供的persona无效时抛出400错误
+    """
     user_id = user.id if user is not None else None
     try:
         new_chat_session = create_chat_session(
@@ -227,6 +292,22 @@ def rename_chat_session(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> RenameChatSessionResponse:
+    """
+    重命名聊天会话
+    
+    参数:
+        rename_req: 重命名请求对象,包含新的名称
+        request: FastAPI请求对象
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    返回:
+        RenameChatSessionResponse: 包含更新后的会话名称
+        
+    说明:
+        如果请求中提供了新名称,直接使用该名称更新;
+        否则使用LLM根据会话历史自动生成新的名称。
+    """
     name = rename_req.name
     chat_session_id = rename_req.chat_session_id
     user_id = user.id if user is not None else None
@@ -275,6 +356,15 @@ def patch_chat_session(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    更新聊天会话的共享状态
+    
+    参数:
+        session_id: 要更新的聊天会话ID
+        chat_session_update_req: 更新请求对象
+        user: 当前用户对象
+        db_session: 数据库会话对象
+    """
     user_id = user.id if user is not None else None
     update_chat_session(
         db_session=db_session,
@@ -290,6 +380,16 @@ def delete_all_chat_sessions(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除用户的所有聊天会话
+    
+    参数:
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    异常:
+        HTTPException: 删除失败时抛出400错误
+    """
     try:
         delete_all_chat_sessions_for_user(user=user, db_session=db_session)
     except ValueError as e:
@@ -302,6 +402,17 @@ def delete_chat_session_by_id(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    删除指定ID的聊天会话
+    
+    参数:
+        session_id: 要删除的聊天会话ID
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    异常:
+        HTTPException: 删除失败时抛出400错误
+    """
     user_id = user.id if user is not None else None
     try:
         delete_chat_session(user_id, session_id, db_session)
@@ -310,6 +421,19 @@ def delete_chat_session_by_id(
 
 
 async def is_connected(request: Request) -> Callable[[], bool]:
+    """
+    检查客户端连接状态的异步函数
+    
+    参数:
+        request: FastAPI请求对象
+        
+    返回:
+        Callable[[], bool]: 返回一个可调用对象,用于检查连接状态
+        
+    说明:
+        此函数用于检查WebSocket连接是否仍然活跃。如果连接断开或发生错误,
+        将返回True以确保安全处理。
+    """
     main_loop = asyncio.get_event_loop()
 
     def is_connected_sync() -> bool:
@@ -340,24 +464,24 @@ def handle_new_chat_message(
     tenant_id: str = Depends(get_current_tenant_id),
 ) -> StreamingResponse:
     """
-    This endpoint is both used for all the following purposes:
-    - Sending a new message in the session
-    - Regenerating a message in the session (just send the same one again)
-    - Editing a message (similar to regenerating but sending a different message)
-    - Kicking off a seeded chat session (set `use_existing_user_message`)
+    此端点用于以下所有用途：
+    - 在会话中发送新消息
+    - 在会话中重新生成消息（再次发送相同的消息）
+    - 编辑消息（类似于重新生成但发送不同的消息）
+    - 启动预设聊天会话（设置 use_existing_user_message）
 
-    Assumes that previous messages have been set as the latest to minimize overhead.
+    假定之前的消息已设置为最新以最小化开销。
 
-    Args:
-        chat_message_req (CreateChatMessageRequest): Details about the new chat message.
-        request (Request): The current HTTP request context.
-        user (User | None): The current user, obtained via dependency injection.
-        _ (None): Rate limit check is run if user/group/global rate limits are enabled.
-        is_connected_func (Callable[[], bool]): Function to check client disconnection,
-            used to stop the streaming response if the client disconnects.
+    参数:
+        chat_message_req: 新聊天消息的详细信息
+        request: 当前HTTP请求上下文
+        user: 当前用户，通过依赖注入获得
+        _rate_limit_check: 如果启用了用户/组/全局速率限制，则运行速率限制检查
+        is_connected_func: 用于检查客户端断开连接的函数
+        tenant_id: 租户ID
 
-    Returns:
-        StreamingResponse: Streams the response to the new chat message.
+    返回:
+        StreamingResponse: 流式传输对新聊天消息的响应
     """
     logger.debug(f"Received new chat message: {chat_message_req.message}")
 
@@ -408,6 +532,14 @@ def set_message_as_latest(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    将指定消息设置为最新消息
+    
+    参数:
+        message_identifier: 消息标识符对象
+        user: 当前用户对象
+        db_session: 数据库会话对象
+    """
     user_id = user.id if user is not None else None
 
     chat_message = get_chat_message(
@@ -429,6 +561,14 @@ def create_chat_feedback(
     user: User | None = Depends(current_limited_user),
     db_session: Session = Depends(get_session),
 ) -> None:
+    """
+    创建聊天消息的反馈
+    
+    参数:
+        feedback: 反馈请求对象
+        user: 当前用户对象
+        db_session: 数据库会话对象
+    """
     user_id = user.id if user else None
 
     create_chat_message_feedback(
@@ -447,10 +587,15 @@ def create_search_feedback(
     _: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> None:
-    """This endpoint isn't protected - it does not check if the user has access to the document
-    Users could try changing boosts of arbitrary docs but this does not leak any data.
     """
-
+    此端点未受保护 - 不检查用户是否有权访问文档
+    用户可以尝试更改任意文档的权重，但这不会泄露任何数据。
+    
+    参数:
+        feedback: 文档搜索反馈的请求对象
+        _: 当前用户对象
+        db_session: 数据库会话对象
+    """
     curr_ind_name, sec_ind_name = get_both_index_names(db_session)
     document_index = get_default_document_index(
         primary_index_name=curr_ind_name, secondary_index_name=sec_ind_name
@@ -468,6 +613,12 @@ def create_search_feedback(
 
 
 class MaxSelectedDocumentTokens(BaseModel):
+    """
+    表示文档可选择的最大token数量
+    
+    属性:
+        max_tokens: 最大token数量
+    """
     max_tokens: int
 
 
@@ -477,6 +628,20 @@ def get_max_document_tokens(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> MaxSelectedDocumentTokens:
+    """
+    获取指定角色可选择的最大文档token数
+    
+    参数:
+        persona_id: 角色ID
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    返回:
+        MaxSelectedDocumentTokens: 包含最大token数的响应对象
+        
+    异常:
+        HTTPException: 当角色不存在时抛出404错误
+    """
     try:
         persona = get_persona_by_id(
             persona_id=persona_id,
@@ -492,25 +657,42 @@ def get_max_document_tokens(
     )
 
 
-"""Endpoints for chat seeding"""
+"""Endpoints for chat seeding"""  # 聊天会话预设的端点
 
 
 class ChatSeedRequest(BaseModel):
-    # standard chat session stuff
+    """
+    预设聊天会话的请求模型
+    
+    属性:
+        persona_id: 角色ID
+        prompt_id: 提示词ID,可选
+        llm_override: LLM覆盖配置,可选
+        prompt_override: 提示词覆盖配置,可选
+        description: 会话描述,可选
+        message: 初始消息,可选
+    """
+    # standard chat session stuff  # 标准会话相关字段
     persona_id: int
     prompt_id: int | None = None
 
-    # overrides / seeding
+    # overrides / seeding  # 覆盖/预设配置
     llm_override: LLMOverride | None = None
     prompt_override: PromptOverride | None = None
     description: str | None = None
     message: str | None = None
 
-    # TODO: support this
+    # TODO: support this  # TODO: 支持这个功能
     # initial_message_retrieval_options: RetrievalDetails | None = None
 
 
 class ChatSeedResponse(BaseModel):
+    """
+    预设聊天会话的响应模型
+    
+    属性:
+        redirect_url: 重定向URL
+    """
     redirect_url: str
 
 
@@ -521,6 +703,20 @@ def seed_chat(
     _: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ChatSeedResponse:
+    """
+    创建预设聊天会话
+    
+    参数:
+        chat_seed_request: 预设聊天会话的请求数据
+        _: 当前用户对象（通常是API密钥而不是实际用户）
+        db_session: 数据库会话对象
+        
+    返回:
+        ChatSeedResponse: 包含重定向URL的响应对象
+        
+    异常:
+        HTTPException: 当提供的persona无效时抛出400错误
+    """
     try:
         new_chat_session = create_chat_session(
             db_session=db_session,
@@ -567,10 +763,22 @@ def seed_chat(
 
 
 class SeedChatFromSlackRequest(BaseModel):
+    """
+    从Slack导入聊天会话的请求模型
+    
+    属性:
+        chat_session_id: Slack中的会话ID
+    """
     chat_session_id: UUID
 
 
 class SeedChatFromSlackResponse(BaseModel):
+    """
+    从Slack导入聊天会话的响应模型
+    
+    属性:
+        redirect_url: 重定向URL
+    """
     redirect_url: str
 
 
@@ -580,6 +788,17 @@ def seed_chat_from_slack(
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> SeedChatFromSlackResponse:
+    """
+    从Slack导入聊天会话并创建新的会话
+    
+    参数:
+        chat_seed_request: 包含Slack聊天会话ID的请求数据
+        user: 当前用户对象
+        db_session: 数据库会话对象
+        
+    返回:
+        SeedChatFromSlackResponse: 包含重定向URL的响应对象
+    """
     slack_chat_session_id = chat_seed_request.chat_session_id
     new_chat_session = duplicate_chat_session_for_user_from_slack(
         db_session=db_session,
@@ -598,13 +817,25 @@ def seed_chat_from_slack(
     )
 
 
-"""File upload"""
+"""File upload"""  # 文件上传
 
 
 def convert_to_jpeg(file: UploadFile) -> Tuple[io.BytesIO, str]:
+    """
+    将上传的图片文件转换为JPEG格式
+    
+    参数:
+        file: 上传的文件对象
+        
+    返回:
+        Tuple[io.BytesIO, str]: 包含转换后的JPEG图片数据流和文件类型
+        
+    异常:
+        HTTPException: 当图片转换失败时抛出
+    """
     try:
         with Image.open(file.file) as img:
-            if img.mode != "RGB":
+            if (img.mode != "RGB"):
                 img = img.convert("RGB")
             jpeg_io = io.BytesIO()
             img.save(jpeg_io, format="JPEG", quality=85)
@@ -613,6 +844,7 @@ def convert_to_jpeg(file: UploadFile) -> Tuple[io.BytesIO, str]:
     except Exception as e:
         raise HTTPException(
             status_code=400, detail=f"Failed to convert image: {str(e)}"
+            # 图片转换失败
         )
 
 
@@ -622,6 +854,20 @@ def upload_files_for_chat(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_user),
 ) -> dict[str, list[FileDescriptor]]:
+    """
+    上传聊天使用的文件
+    
+    参数:
+        files: 上传的文件列表
+        db_session: 数据库会话对象
+        _: 当前用户对象
+        
+    返回:
+        dict[str, list[FileDescriptor]]: 包含已上传文件描述符的字典
+        
+    异常:
+        HTTPException: 当文件类型不支持或文件大小超限时抛出400错误
+    """
     image_content_types = {"image/jpeg", "image/png", "image/webp"}
     csv_content_types = {"text/csv"}
     text_content_types = {
@@ -745,6 +991,20 @@ def fetch_chat_file(
     db_session: Session = Depends(get_session),
     _: User | None = Depends(current_user),
 ) -> Response:
+    """
+    获取聊天文件内容
+    
+    参数:
+        file_id: 文件ID
+        db_session: 数据库会话对象
+        _: 当前用户对象
+        
+    返回:
+        Response: 文件内容的响应对象
+        
+    异常:
+        HTTPException: 当文件不存在时抛出404错误
+    """
     file_store = get_default_file_store(db_session)
     file_record = file_store.read_file_record(file_id)
     if not file_record:

@@ -1,3 +1,8 @@
+"""
+This file contains database operations related to LLM (Language Learning Model) providers and embedding providers.
+本文件包含与LLM（语言学习模型）提供者和嵌入提供者相关的数据库操作。
+"""
+
 from sqlalchemy import delete
 from sqlalchemy import or_
 from sqlalchemy import select
@@ -23,7 +28,15 @@ def update_group_llm_provider_relationships__no_commit(
     group_ids: list[int] | None,
     db_session: Session,
 ) -> None:
-    # Delete existing relationships
+    """
+    更新LLM提供者和用户组之间的关系映射
+    
+    参数:
+        llm_provider_id: LLM提供者ID
+        group_ids: 用户组ID列表
+        db_session: 数据库会话
+    """
+    # Delete existing relationships (删除现有关系)
     db_session.query(LLMProvider__UserGroup).filter(
         LLMProvider__UserGroup.llm_provider_id == llm_provider_id
     ).delete(synchronize_session="fetch")
@@ -43,6 +56,15 @@ def update_group_llm_provider_relationships__no_commit(
 def upsert_cloud_embedding_provider(
     db_session: Session, provider: CloudEmbeddingProviderCreationRequest
 ) -> CloudEmbeddingProvider:
+    """
+    插入或更新云端嵌入提供者
+    
+    参数:
+        db_session: 数据库会话
+        provider: 云端嵌入提供者创建请求
+    返回:
+        CloudEmbeddingProvider: 更新后的云端嵌入提供者
+    """
     existing_provider = (
         db_session.query(CloudEmbeddingProviderModel)
         .filter_by(provider_type=provider.provider_type)
@@ -65,6 +87,15 @@ def upsert_llm_provider(
     llm_provider: LLMProviderUpsertRequest,
     db_session: Session,
 ) -> FullLLMProvider:
+    """
+    插入或更新LLM提供者
+    
+    参数:
+        llm_provider: LLM提供者更新请求
+        db_session: 数据库会话
+    返回:
+        FullLLMProvider: 更新后的完整LLM提供者信息
+    """
     existing_llm_provider = db_session.scalar(
         select(LLMProviderModel).where(LLMProviderModel.name == llm_provider.name)
     )
@@ -105,18 +136,44 @@ def upsert_llm_provider(
 def fetch_existing_embedding_providers(
     db_session: Session,
 ) -> list[CloudEmbeddingProviderModel]:
+    """
+    获取所有现有的嵌入提供者列表
+    
+    参数:
+        db_session: 数据库会话
+    返回:
+        list[CloudEmbeddingProviderModel]: 嵌入提供者模型列表
+    """
     return list(db_session.scalars(select(CloudEmbeddingProviderModel)).all())
 
 
 def fetch_existing_doc_sets(
     db_session: Session, doc_ids: list[int]
 ) -> list[DocumentSet]:
+    """
+    根据文档ID列表获取现有的文档集
+    
+    参数:
+        db_session: 数据库会话
+        doc_ids: 文档ID列表
+    返回:
+        list[DocumentSet]: 文档集列表
+    """
     return list(
         db_session.scalars(select(DocumentSet).where(DocumentSet.id.in_(doc_ids))).all()
     )
 
 
 def fetch_existing_tools(db_session: Session, tool_ids: list[int]) -> list[ToolModel]:
+    """
+    根据工具ID列表获取现有的工具
+    
+    参数:
+        db_session: 数据库会话
+        tool_ids: 工具ID列表
+    返回:
+        list[ToolModel]: 工具模型列表
+    """
     return list(
         db_session.scalars(select(ToolModel).where(ToolModel.id.in_(tool_ids))).all()
     )
@@ -126,6 +183,15 @@ def fetch_existing_llm_providers(
     db_session: Session,
     user: User | None = None,
 ) -> list[LLMProviderModel]:
+    """
+    获取用户可访问的LLM提供者列表
+    
+    参数:
+        db_session: 数据库会话
+        user: 用户对象，如果为None则获取所有提供者
+    返回:
+        list[LLMProviderModel]: LLM提供者模型列表
+    """
     if not user:
         return list(db_session.scalars(select(LLMProviderModel)).all())
     stmt = select(LLMProviderModel).distinct()
@@ -148,6 +214,15 @@ def fetch_existing_llm_providers(
 def fetch_embedding_provider(
     db_session: Session, provider_type: EmbeddingProvider
 ) -> CloudEmbeddingProviderModel | None:
+    """
+    根据提供者类型获取特定的嵌入提供者
+    
+    参数:
+        db_session: 数据库会话
+        provider_type: 提供者类型
+    返回:
+        CloudEmbeddingProviderModel | None: 嵌入提供者模型或None
+    """
     return db_session.scalar(
         select(CloudEmbeddingProviderModel).where(
             CloudEmbeddingProviderModel.provider_type == provider_type
@@ -156,6 +231,14 @@ def fetch_embedding_provider(
 
 
 def fetch_default_provider(db_session: Session) -> FullLLMProvider | None:
+    """
+    获取默认的LLM提供者
+    
+    参数:
+        db_session: 数据库会话
+    返回:
+        FullLLMProvider | None: 完整的LLM提供者信息或None
+    """
     provider_model = db_session.scalar(
         select(LLMProviderModel).where(
             LLMProviderModel.is_default_provider == True  # noqa: E712
@@ -167,6 +250,15 @@ def fetch_default_provider(db_session: Session) -> FullLLMProvider | None:
 
 
 def fetch_provider(db_session: Session, provider_name: str) -> FullLLMProvider | None:
+    """
+    根据提供者名称获取LLM提供者
+    
+    参数:
+        db_session: 数据库会话
+        provider_name: 提供者名称
+    返回:
+        FullLLMProvider | None: 完整的LLM提供者信息或None
+    """
     provider_model = db_session.scalar(
         select(LLMProviderModel).where(LLMProviderModel.name == provider_name)
     )
@@ -178,6 +270,13 @@ def fetch_provider(db_session: Session, provider_name: str) -> FullLLMProvider |
 def remove_embedding_provider(
     db_session: Session, provider_type: EmbeddingProvider
 ) -> None:
+    """
+    删除指定类型的嵌入提供者
+    
+    参数:
+        db_session: 数据库会话
+        provider_type: 提供者类型
+    """
     db_session.execute(
         delete(SearchSettings).where(SearchSettings.provider_type == provider_type)
     )
@@ -193,6 +292,13 @@ def remove_embedding_provider(
 
 
 def remove_llm_provider(db_session: Session, provider_id: int) -> None:
+    """
+    删除指定ID的LLM提供者
+    
+    参数:
+        db_session: 数据库会话
+        provider_id: LLM提供者ID
+    """
     # Remove LLMProvider's dependent relationships
     db_session.execute(
         delete(LLMProvider__UserGroup).where(
@@ -207,6 +313,15 @@ def remove_llm_provider(db_session: Session, provider_id: int) -> None:
 
 
 def update_default_provider(provider_id: int, db_session: Session) -> None:
+    """
+    更新默认的LLM提供者
+    
+    参数:
+        provider_id: 要设置为默认的提供者ID
+        db_session: 数据库会话
+    异常:
+        ValueError: 当指定的提供者ID不存在时抛出
+    """
     new_default = db_session.scalar(
         select(LLMProviderModel).where(LLMProviderModel.id == provider_id)
     )

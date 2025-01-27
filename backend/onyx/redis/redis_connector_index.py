@@ -1,3 +1,12 @@
+"""
+此文件用于管理Redis中索引任务相关的操作。
+主要功能包括:
+1. 管理索引任务的状态和进度
+2. 处理任务锁定和解锁
+3. 提供任务终止和活动状态控制
+4. 管理生成器任务的各种状态
+"""
+
 from datetime import datetime
 from typing import cast
 from uuid import uuid4
@@ -7,32 +16,27 @@ from pydantic import BaseModel
 
 
 class RedisConnectorIndexPayload(BaseModel):
-    index_attempt_id: int | None
-    started: datetime | None
-    submitted: datetime
-    celery_task_id: str | None
+    """Redis连接器索引任务的数据载体类"""
+    index_attempt_id: int | None  # 索引尝试ID
+    started: datetime | None      # 开始时间
+    submitted: datetime          # 提交时间
+    celery_task_id: str | None   # Celery任务ID
 
 
 class RedisConnectorIndex:
     """Manages interactions with redis for indexing tasks. Should only be accessed
-    through RedisConnector."""
+    through RedisConnector.
+    管理Redis中索引任务的交互。只能通过RedisConnector访问。
+    """
 
+    # Redis键前缀定义
     PREFIX = "connectorindexing"
-    FENCE_PREFIX = f"{PREFIX}_fence"  # "connectorindexing_fence"
-    GENERATOR_TASK_PREFIX = PREFIX + "+generator"  # "connectorindexing+generator_fence"
-    GENERATOR_PROGRESS_PREFIX = (
-        PREFIX + "_generator_progress"
-    )  # connectorindexing_generator_progress
-    GENERATOR_COMPLETE_PREFIX = (
-        PREFIX + "_generator_complete"
-    )  # connectorindexing_generator_complete
-
+    FENCE_PREFIX = f"{PREFIX}_fence"  
+    GENERATOR_TASK_PREFIX = PREFIX + "+generator"  
+    GENERATOR_PROGRESS_PREFIX = PREFIX + "_generator_progress"
+    GENERATOR_COMPLETE_PREFIX = PREFIX + "_generator_complete"
     GENERATOR_LOCK_PREFIX = "da_lock:indexing"
-
-    TERMINATE_PREFIX = PREFIX + "_terminate"  # connectorindexing_terminate
-
-    # used to signal the overall workflow is still active
-    # it's difficult to prevent
+    TERMINATE_PREFIX = PREFIX + "_terminate"
     ACTIVE_PREFIX = PREFIX + "_active"
 
     def __init__(
@@ -42,11 +46,21 @@ class RedisConnectorIndex:
         search_settings_id: int,
         redis: redis.Redis,
     ) -> None:
+        """
+        初始化Redis连接器索引实例
+        
+        参数:
+            tenant_id: 租户ID
+            id: 连接器ID
+            search_settings_id: 搜索设置ID
+            redis: Redis客户端实例
+        """
         self.tenant_id: str | None = tenant_id
         self.id = id
         self.search_settings_id = search_settings_id
         self.redis = redis
 
+        # 初始化各种Redis键
         self.fence_key: str = f"{self.FENCE_PREFIX}_{id}/{search_settings_id}"
         self.generator_progress_key = (
             f"{self.GENERATOR_PROGRESS_PREFIX}_{id}/{search_settings_id}"
@@ -62,38 +76,64 @@ class RedisConnectorIndex:
 
     @classmethod
     def fence_key_with_ids(cls, cc_pair_id: int, search_settings_id: int) -> str:
+        """
+        生成fence键
+        
+        参数:
+            cc_pair_id: 连接器对ID
+            search_settings_id: 搜索设置ID
+        返回:
+            生成的fence键字符串
+        """
         return f"{cls.FENCE_PREFIX}_{cc_pair_id}/{search_settings_id}"
 
     def generate_generator_task_id(self) -> str:
-        # celery's default task id format is "dd32ded3-00aa-4884-8b21-42f8332e7fac"
-        # we prefix the task id so it's easier to keep track of who created the task
-        # aka "connectorindexing+generator_1_6dd32ded3-00aa-4884-8b21-42f8332e7fac"
-
+        """
+        生成生成器任务ID
+        
+        返回:
+            生成的任务ID字符串
+        """
         return f"{self.GENERATOR_TASK_PREFIX}_{self.id}/{self.search_settings_id}_{uuid4()}"
 
     @property
     def fenced(self) -> bool:
+        """
+        检查是否存在fence
+        
+        返回:
+            如果存在fence返回True，否则返回False
+        """
         if self.redis.exists(self.fence_key):
             return True
-
         return False
 
     @property
     def payload(self) -> RedisConnectorIndexPayload | None:
-        # read related data and evaluate/print task progress
+        """
+        获取fence的数据载体
+        
+        返回:
+            如果存在则返回RedisConnectorIndexPayload对象，否则返回None
+        """
         fence_bytes = cast(bytes, self.redis.get(self.fence_key))
         if fence_bytes is None:
             return None
 
         fence_str = fence_bytes.decode("utf-8")
         payload = RedisConnectorIndexPayload.model_validate_json(cast(str, fence_str))
-
         return payload
 
     def set_fence(
         self,
         payload: RedisConnectorIndexPayload | None,
     ) -> None:
+        """
+        设置fence的数据载体
+        
+        参数:
+            payload: RedisConnectorIndexPayload对象或None
+        """
         if not payload:
             self.redis.delete(self.fence_key)
             return
@@ -101,38 +141,62 @@ class RedisConnectorIndex:
         self.redis.set(self.fence_key, payload.model_dump_json())
 
     def terminating(self, celery_task_id: str) -> bool:
+        """
+        检查是否存在终止信号
+        
+        参数:
+            celery_task_id: Celery任务ID
+        返回:
+            如果存在终止信号返回True，否则返回False
+        """
         if self.redis.exists(f"{self.terminate_key}_{celery_task_id}"):
             return True
-
         return False
 
     def set_terminate(self, celery_task_id: str) -> None:
-        """This sets a signal. It does not block!"""
-        # We shouldn't need very long to terminate the spawned task.
-        # 10 minute TTL is good.
+        """
+        设置终止信号
+        
+        参数:
+            celery_task_id: Celery任务ID
+        """
         self.redis.set(f"{self.terminate_key}_{celery_task_id}", 0, ex=600)
 
     def set_active(self) -> None:
-        """This sets a signal to keep the indexing flow from getting cleaned up within
-        the expiration time.
-
-        The slack in timing is needed to avoid race conditions where simply checking
-        the celery queue and task status could result in race conditions."""
+        """
+        设置活动信号，防止索引流程在过期时间内被清理
+        """
         self.redis.set(self.active_key, 0, ex=3600)
 
     def active(self) -> bool:
+        """
+        检查是否存在活动信号
+        
+        返回:
+            如果存在活动信号返回True，否则返回False
+        """
         if self.redis.exists(self.active_key):
             return True
-
         return False
 
     def generator_locked(self) -> bool:
+        """
+        检查生成器是否被锁定
+        
+        返回:
+            如果生成器被锁定返回True，否则返回False
+        """
         if self.redis.exists(self.generator_lock_key):
             return True
-
         return False
 
     def set_generator_complete(self, payload: int | None) -> None:
+        """
+        设置生成器完成状态
+        
+        参数:
+            payload: 完成状态的整数值或None
+        """
         if not payload:
             self.redis.delete(self.generator_complete_key)
             return
@@ -140,12 +204,19 @@ class RedisConnectorIndex:
         self.redis.set(self.generator_complete_key, payload)
 
     def generator_clear(self) -> None:
+        """
+        清除生成器的进度和完成状态
+        """
         self.redis.delete(self.generator_progress_key)
         self.redis.delete(self.generator_complete_key)
 
     def get_progress(self) -> int | None:
-        """Returns None if the key doesn't exist. The"""
-        # TODO: move into fence?
+        """
+        获取生成器的进度
+        
+        返回:
+            进度的整数值或None
+        """
         bytes = self.redis.get(self.generator_progress_key)
         if bytes is None:
             return None
@@ -154,7 +225,12 @@ class RedisConnectorIndex:
         return progress
 
     def get_completion(self) -> int | None:
-        # TODO: move into fence?
+        """
+        获取生成器的完成状态
+        
+        返回:
+            完成状态的整数值或None
+        """
         bytes = self.redis.get(self.generator_complete_key)
         if bytes is None:
             return None
@@ -163,6 +239,9 @@ class RedisConnectorIndex:
         return status
 
     def reset(self) -> None:
+        """
+        重置所有相关的Redis键
+        """
         self.redis.delete(self.active_key)
         self.redis.delete(self.generator_lock_key)
         self.redis.delete(self.generator_progress_key)
@@ -171,7 +250,12 @@ class RedisConnectorIndex:
 
     @staticmethod
     def reset_all(r: redis.Redis) -> None:
-        """Deletes all redis values for all connectors"""
+        """
+        删除所有连接器的Redis值
+        
+        参数:
+            r: Redis客户端实例
+        """
         for key in r.scan_iter(RedisConnectorIndex.ACTIVE_PREFIX + "*"):
             r.delete(key)
 

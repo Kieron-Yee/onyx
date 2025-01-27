@@ -1,3 +1,9 @@
+"""
+此文件用于处理用户相关的数据库操作，包括用户的增删改查、角色管理等功能。
+主要实现了用户管理系统的核心数据库交互功能，包括用户过滤、分页查询、
+用户验证以及特殊用户（如Slack用户）的处理等。
+"""
+
 from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
@@ -25,16 +31,20 @@ from onyx.utils.variable_functionality import fetch_ee_implementation_or_noop
 
 def validate_user_role_update(requested_role: UserRole, current_role: UserRole) -> None:
     """
+    验证用户角色更新是否有效。
+    假定只有管理员可以访问此端点。
+
+    当出现以下情况时会raise异常：
+    - 请求的角色是curator
+    - 请求的角色是slack用户
+    - 请求的角色是外部授权用户
+    - 请求的角色是受限用户
+    - 当前角色是slack用户
+    - 当前角色是外部授权用户
+    - 当前角色是受限用户
+
     Validate that a user role update is valid.
-    Assumed only admins can hit this endpoint.
-    raise if:
-    - requested role is a curator
-    - requested role is a slack user
-    - requested role is an external permissioned user
-    - requested role is a limited user
-    - current role is a slack user
-    - current role is an external permissioned user
-    - current role is a limited user
+    Assumed only admins can hit this endpoint. 
     """
 
     if current_role == UserRole.SLACK_USER:
@@ -100,8 +110,15 @@ def get_all_users(
     email_filter_string: str | None = None,
     include_external: bool = False,
 ) -> Sequence[User]:
-    """List all users. No pagination as of now, as the # of users
-    is assumed to be relatively small (<< 1 million)"""
+    """
+    获取所有用户列表。
+    目前不支持分页，因为假设用户数量相对较少（远小于100万）。
+
+    参数：
+    - db_session: 数据库会话
+    - email_filter_string: 邮箱过滤字符串
+    - include_external: 是否包含外部用户
+    """
     stmt = select(User)
 
     where_clause = []
@@ -124,19 +141,18 @@ def _get_accepted_user_where_clause(
     is_active_filter: bool | None = None,
 ) -> list[ColumnElement[bool]]:
     """
-    Generates a SQLAlchemy where clause for filtering users based on the provided parameters.
-    This is used to build the filters for the function that retrieves the users for the users table in the admin panel.
+    生成用于过滤用户的SQLAlchemy where子句。
+    用于构建管理面板中用户表的用户检索过滤条件。
 
-    Parameters:
-    - email_filter_string: A substring to filter user emails. Only users whose emails contain this substring will be included.
-    - is_active_filter: When True, only active users will be included. When False, only inactive users will be included.
-    - roles_filter: A list of user roles to filter by. Only users with roles in this list will be included.
-    - include_external: If False, external permissioned users will be excluded.
+    参数：
+    - email_filter_string: 用于过滤用户邮箱的子字符串
+    - roles_filter: 用户角色过滤列表
+    - include_external: 是否包含外部用户
+    - is_active_filter: 是否过滤活跃用户
 
-    Returns:
-    - list: A list of conditions to be used in a SQLAlchemy query to filter users.
+    返回：
+    - 用于SQLAlchemy查询的过滤条件列表
     """
-
     # Access table columns directly via __table__.c to get proper SQLAlchemy column types
     # This ensures type checking works correctly for SQL operations like ilike, endswith, and is_
     email_col: KeyedColumnElement[Any] = User.__table__.c.email
@@ -170,6 +186,10 @@ def get_page_of_filtered_users(
     roles_filter: list[UserRole] = [],
     include_external: bool = False,
 ) -> Sequence[User]:
+    """
+    获取经过过滤的用户分页数据。
+    实现了用户列表的分页查询功能，支持多种过滤条件。
+    """
     users_stmt = select(User)
 
     where_clause = _get_accepted_user_where_clause(
@@ -193,6 +213,10 @@ def get_total_filtered_users_count(
     roles_filter: list[UserRole] = [],
     include_external: bool = False,
 ) -> int:
+    """
+    获取符合过滤条件的用户总数。
+    用于分页功能中计算总页数。
+    """
     where_clause = _get_accepted_user_where_clause(
         email_filter_string=email_filter_string,
         roles_filter=roles_filter,
@@ -207,6 +231,10 @@ def get_total_filtered_users_count(
 
 
 def get_user_by_email(email: str, db_session: Session) -> User | None:
+    """
+    通过邮箱地址查找用户。
+    返回匹配的用户对象，如果未找到则返回None。
+    """
     user = (
         db_session.query(User)
         .filter(func.lower(User.email) == func.lower(email))
@@ -216,10 +244,18 @@ def get_user_by_email(email: str, db_session: Session) -> User | None:
 
 
 def fetch_user_by_id(db_session: Session, user_id: UUID) -> User | None:
+    """
+    通过用户ID查找用户。
+    返回匹配的用户对象，如果未找到则返回None。
+    """
     return db_session.query(User).filter(User.id == user_id).first()  # type: ignore
 
 
 def _generate_slack_user(email: str) -> User:
+    """
+    生成一个新的Slack用户对象。
+    为用户生成随机密码并创建用户记录。
+    """
     fastapi_users_pw_helper = PasswordHelper()
     password = fastapi_users_pw_helper.generate()
     hashed_pass = fastapi_users_pw_helper.hash(password)
@@ -231,6 +267,10 @@ def _generate_slack_user(email: str) -> User:
 
 
 def add_slack_user_if_not_exists(db_session: Session, email: str) -> User:
+    """
+    添加Slack用户（如果不存在）。
+    如果用户已存在但是是外部授权用户，则将其更新为Slack用户。
+    """
     email = email.lower()
     user = get_user_by_email(email, db_session)
     if user is not None:
@@ -249,6 +289,10 @@ def add_slack_user_if_not_exists(db_session: Session, email: str) -> User:
 def _get_users_by_emails(
     db_session: Session, lower_emails: list[str]
 ) -> tuple[list[User], list[str]]:
+    """
+    通过邮箱列表批量查找用户。
+    返回找到的用户列表和未找到的邮箱列表。
+    """
     stmt = select(User).filter(func.lower(User.email).in_(lower_emails))  # type: ignore
     found_users = list(db_session.scalars(stmt).unique().all())  # Convert to list
 
@@ -263,6 +307,10 @@ def _get_users_by_emails(
 
 
 def _generate_ext_permissioned_user(email: str) -> User:
+    """
+    生成一个新的外部授权用户对象。
+    为用户生成随机密码并创建用户记录。
+    """
     fastapi_users_pw_helper = PasswordHelper()
     password = fastapi_users_pw_helper.generate()
     hashed_pass = fastapi_users_pw_helper.hash(password)
@@ -276,6 +324,10 @@ def _generate_ext_permissioned_user(email: str) -> User:
 def batch_add_ext_perm_user_if_not_exists(
     db_session: Session, emails: list[str]
 ) -> list[User]:
+    """
+    批量添加外部授权用户（如果不存在）。
+    返回所有处理后的用户列表。
+    """
     lower_emails = [email.lower() for email in emails]
     found_users, missing_lower_emails = _get_users_by_emails(db_session, lower_emails)
 
@@ -293,6 +345,10 @@ def delete_user_from_db(
     user_to_delete: User,
     db_session: Session,
 ) -> None:
+    """
+    从数据库中删除指定用户。
+    同时清理与该用户相关的所有数据，包括OAuth账户、SAML账户、文档集关联等。
+    """
     for oauth_account in user_to_delete.oauth_accounts:
         db_session.delete(oauth_account)
 

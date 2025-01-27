@@ -1,3 +1,12 @@
+"""
+此模块用于处理和加载初始文档数据。
+主要功能：
+1. 加载和处理预处理好的文档
+2. 创建可索引的文档块
+3. 初始化文档种子数据
+4. 管理文档的索引过程
+"""
+
 import datetime
 import json
 import os
@@ -43,13 +52,25 @@ def _create_indexable_chunks(
     preprocessed_docs: list[dict],
     tenant_id: str | None,
 ) -> tuple[list[Document], list[DocMetadataAwareIndexChunk]]:
+    """
+    将预处理的文档转换为可索引的文档块。
+
+    参数:
+        preprocessed_docs: 预处理过的文档列表
+        tenant_id: 租户ID
+
+    返回:
+        tuple: 包含文档列表和文档块列表的元组
+    """
     ids_to_documents = {}
     chunks = []
     for preprocessed_doc in preprocessed_docs:
         document = Document(
             id=preprocessed_doc["url"],  # For Web connector, the URL is the ID
+                                         # 对于Web连接器，URL就是ID
             # The section is not really used past this point since we have already done the other processing
             # for the chunking and embedding.
+            # 此处的section实际上不会被使用，因为我们已经完成了分块和嵌入的其他处理
             sections=[
                 Section(text=preprocessed_doc["content"], link=preprocessed_doc["url"])
             ],
@@ -95,7 +116,17 @@ def _create_indexable_chunks(
 
 
 # Cohere is used in EE version
+# Cohere在企业版中使用
 def load_processed_docs(cohere_enabled: bool) -> list[dict]:
+    """
+    从JSON文件中加载预处理好的文档数据。
+
+    参数:
+        cohere_enabled: 是否启用Cohere功能标志
+
+    返回:
+        list[dict]: 预处理文档的列表
+    """
     initial_docs_path = os.path.join(
         os.getcwd(),
         "onyx",
@@ -110,25 +141,28 @@ def seed_initial_documents(
     db_session: Session, tenant_id: str | None, cohere_enabled: bool = False
 ) -> None:
     """
-    Seed initial documents so users don't have an empty index to start
+    为新用户初始化种子文档，使其不会从空索引开始。
+    # Documents are only loaded if:
+    # - This is the first setup (if the user deletes the docs, we don't load them again)
+    # - The index is empty, there are no docs and no (non-default) connectors
+    # - The user has not updated the embedding models
+    # 文档只在以下情况下加载：
+    # - 这是首次设置（如果用户删除了文档，我们不会再次加载）
+    # - 索引为空，没有文档和非默认连接器
+    # - 用户尚未更新嵌入模型
 
-    Documents are only loaded if:
-    - This is the first setup (if the user deletes the docs, we don't load them again)
-    - The index is empty, there are no docs and no (non-default) connectors
-    - The user has not updated the embedding models
-        - If they do, then we have to actually index the website
-        - If the embedding model is already updated on server startup, they're not a new user
+    参数:
+        db_session: 数据库会话
+        tenant_id: 租户ID
+        cohere_enabled: 是否启用Cohere功能
 
-    Note that regardless of any search settings, the default documents are always loaded with
-    the predetermined chunk sizes and single pass embedding.
-
-    Steps are as follows:
-    - Check if this needs to run
-    - Create the connector representing this
-    - Create the cc-pair (attaching the public credential) and mocking values like the last success
-    - Indexing the documents into Postgres
-    - Indexing the documents into Vespa
-    - Create a fake index attempt with fake times
+    处理步骤：
+    1. 检查是否需要运行
+    2. 创建代表此操作的连接器
+    3. 创建cc-pair并模拟数据
+    4. 将文档索引到Postgres
+    5. 将文档索引到Vespa
+    6. 创建带有模拟时间的假索引尝试
     """
     logger.info("Seeding initial documents")
 
@@ -161,6 +195,7 @@ def seed_initial_documents(
 
     # Create a connector so the user can delete it if they want
     # or reindex it with a new search model if they want
+    # 创建一个连接器，以便用户可以在需要时删除它，或使用新的搜索模型重新索引它
     connector_data = ConnectorBase(
         name="Sample Use Cases",
         source=DocumentSource.WEB,
@@ -170,6 +205,7 @@ def seed_initial_documents(
             "web_connector_type": "recursive",
         },
         refresh_freq=None,  # Never refresh by default
+                           # 默认情况下永不刷新
         prune_freq=None,
         indexing_start=None,
     )
@@ -206,10 +242,12 @@ def seed_initial_documents(
         ),
         db_session=db_session,
         ignore_time_skip=True,  # Doesn't actually matter here
+                               # 这里其实无关紧要
     )
 
     # In this case since there are no other connectors running in the background
     # and this is a fresh deployment, there is no need to grab any locks
+    # 在这种情况下，由于后台没有其他连接器运行，且这是一个全新部署，所以不需要获取锁
     logger.info(
         "Indexing seeding documents into Vespa "
         "(Vespa may take a few seconds to become ready after receiving the schema)"
@@ -217,6 +255,7 @@ def seed_initial_documents(
 
     # Retries here because the index may take a few seconds to become ready
     # as we just sent over the Vespa schema and there is a slight delay
+    # 在这里重试是因为索引可能需要几秒钟才能准备就绪，因为我们刚刚发送了Vespa架构，会有轻微延迟
 
     index_with_retries = retry_builder(tries=15)(document_index.index)
     index_with_retries(
@@ -230,6 +269,7 @@ def seed_initial_documents(
     )
 
     # Mock a run for the UI even though it did not actually call out to anything
+    # 为UI模拟一次运行，尽管实际上没有调用任何东西
     mock_successful_index_attempt(
         connector_credential_pair_id=cc_pair_id,
         search_settings_id=search_settings.id,

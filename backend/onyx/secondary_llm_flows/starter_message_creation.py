@@ -1,3 +1,12 @@
+"""
+此模块负责生成聊天起始消息。
+主要功能包括:
+1. 从文档集中获取随机文本块
+2. 生成对话类别
+3. 为每个类别生成起始消息
+4. 处理LLM响应并解析输出
+"""
+
 import json
 import re
 from typing import Any
@@ -36,6 +45,15 @@ def get_random_chunks_from_doc_sets(
 ) -> List[InferenceChunk]:
     """
     Retrieves random chunks from the specified document sets.
+    从指定的文档集中检索随机文本块。
+
+    参数:
+        doc_sets: 文档集名称列表
+        db_session: 数据库会话
+        user: 用户对象，用于访问控制
+
+    返回:
+        List[InferenceChunk]: 检索到的文本块列表
     """
     curr_ind_name, sec_ind_name = get_both_index_names(db_session)
     document_index = get_default_document_index(curr_ind_name, sec_ind_name)
@@ -52,8 +70,16 @@ def get_random_chunks_from_doc_sets(
 def parse_categories(content: str) -> List[str]:
     """
     Parses the JSON array of categories from the LLM response.
+    从LLM响应中解析JSON格式的类别数组。
+
+    参数:
+        content: LLM返回的原始响应内容
+
+    返回:
+        List[str]: 解析出的类别列表，解析失败则返回空列表
     """
     # Clean the response to remove code fences and extra whitespace
+    # 清理响应内容，移除代码标记和多余空格
     content = content.strip().strip("```").strip()
     if content.startswith("json"):
         content = content[4:].strip()
@@ -61,11 +87,11 @@ def parse_categories(content: str) -> List[str]:
     try:
         categories = json.loads(content)
         if not isinstance(categories, list):
-            logger.error("Categories are not a list.")
+            logger.error("Categories are not a list.") # 类别不是列表格式
             return []
         return categories
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse categories: {e}")
+        logger.error(f"Failed to parse categories: {e}") # 解析类别失败
         return []
 
 
@@ -80,6 +106,19 @@ def generate_start_message_prompts(
 ) -> List[FunctionCall]:
     """
     Generates the list of FunctionCall objects for starter message generation.
+    生成用于创建起始消息的函数调用列表。
+
+    参数:
+        name: 助手名称
+        description: 助手描述
+        instructions: 助手指令
+        categories: 类别列表
+        chunk_contents: 示例文本内容
+        supports_structured_output: 是否支持结构化输出
+        fast_llm: LLM实例
+
+    返回:
+        List[FunctionCall]: 函数调用对象列表
     """
     functions = []
     for category in categories:
@@ -120,33 +159,45 @@ def generate_start_message_prompts(
 
 def parse_unstructured_output(output: str) -> Dict[str, str]:
     """
-    Parses the assistant's unstructured output into a dictionary with keys:
-    - 'name' (Title)
-    - 'message' (Message)
+    Parses the assistant's unstructured output into a dictionary with keys.
+    将助手的非结构化输出解析为字典格式。
+
+    参数:
+        output: LLM的原始响应文本
+
+    返回:
+        Dict[str, str]: 包含name和message的字典
     """
 
     # Debug output
+    # 调试输出
     logger.debug(f"LLM Output for starter message creation: {output}")
 
     # Patterns to match
+    # 匹配模式
     title_pattern = r"(?i)^\**Title\**\s*:\s*(.+)"
     message_pattern = r"(?i)^\**Message\**\s*:\s*(.+)"
 
     # Initialize the response dictionary
+    # 初始化响应字典
     response_dict = {}
 
     # Split the output into lines
+    # 将输出分割成行
     lines = output.strip().split("\n")
 
     # Variables to keep track of the current key being processed
+    # 用于追踪当前正在处理的键的变量
     current_key = None
     current_value_lines = []
 
     for line in lines:
         # Check for title
+        # 检查标题
         title_match = re.match(title_pattern, line.strip())
         if title_match:
             # Save previous key-value pair if any
+            # 如果存在，保存之前的键值对
             if current_key and current_value_lines:
                 response_dict[current_key] = " ".join(current_value_lines).strip()
                 current_value_lines = []
@@ -155,6 +206,7 @@ def parse_unstructured_output(output: str) -> Dict[str, str]:
             continue
 
         # Check for message
+        # 检查消息
         message_match = re.match(message_pattern, line.strip())
         if message_match:
             if current_key and current_value_lines:
@@ -165,16 +217,19 @@ def parse_unstructured_output(output: str) -> Dict[str, str]:
             continue
 
         # If the line doesn't match a new key, append it to the current value
+        # 如果该行不匹配新的键，将其添加到当前值
         if current_key:
             current_value_lines.append(line.strip())
 
     # Add the last key-value pair
+    # 添加最后一个键值对
     if current_key and current_value_lines:
         response_dict[current_key] = " ".join(current_value_lines).strip()
 
     # Validate that the necessary keys are present
+    # 验证必要的键是否存在
     if not all(k in response_dict for k in ["name", "message"]):
-        raise ValueError("Failed to parse the assistant's response.")
+        raise ValueError("Failed to parse the assistant's response.") # 解析助手响应失败
 
     return response_dict
 
@@ -189,7 +244,18 @@ def generate_starter_messages(
 ) -> List[StarterMessage]:
     """
     Generates starter messages by first obtaining categories and then generating messages for each category.
-    On failure, returns an empty list (or list with processed starter messages if some messages are processed successfully).
+    首先获取类别，然后为每个类别生成起始消息。
+
+    参数:
+        name: 助手名称
+        description: 助手描述
+        instructions: 助手指令
+        document_set_ids: 文档集ID列表
+        db_session: 数据库会话
+        user: 用户对象
+
+    返回:
+        List[StarterMessage]: 生成的起始消息列表，失败时返回空列表或部分成功的消息
     """
     _, fast_llm = get_default_llms(temperature=0.5)
 
@@ -202,6 +268,7 @@ def generate_starter_messages(
     )
 
     # Generate categories
+    # 生成类别
     category_generation_prompt = PERSONA_CATEGORY_GENERATION_PROMPT.format(
         name=name,
         description=description,
@@ -217,6 +284,7 @@ def generate_starter_messages(
         return []
 
     # Fetch example content if document sets are provided
+    # 如果提供了文档集，获取示例内容
     if document_set_ids:
         document_sets = get_document_sets_by_ids(
             document_set_ids=document_set_ids,
@@ -230,11 +298,13 @@ def generate_starter_messages(
         )
 
         # Add example content context
+        # 添加示例内容上下文
         chunk_contents = "\n".join(chunk.content.strip() for chunk in chunks)
     else:
         chunk_contents = ""
 
     # Generate prompts for starter messages
+    # 生成起始消息的提示
     functions = generate_start_message_prompts(
         name,
         description,
@@ -246,8 +316,9 @@ def generate_starter_messages(
     )
 
     # Run LLM calls in parallel
+    # 并行运行LLM调用
     if not functions:
-        logger.error("No functions to execute for starter message generation.")
+        logger.error("No functions to execute for starter message generation.") # 没有要执行的起始消息生成函数
         return []
 
     results = run_functions_in_parallel(function_calls=functions)

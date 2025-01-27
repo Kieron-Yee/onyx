@@ -1,3 +1,9 @@
+"""
+API密钥管理模块：
+提供API密钥的创建、查询、更新、重新生成和删除等数据库操作功能。
+包含API密钥相关的数据库交互逻辑，用于管理系统中的API密钥及其关联用户。
+"""
+
 import uuid
 
 from fastapi_users.password import PasswordHelper
@@ -21,14 +27,33 @@ from shared_configs.contextvars import CURRENT_TENANT_ID_CONTEXTVAR
 
 
 def get_api_key_email_pattern() -> str:
+    """获取API密钥关联的邮箱域名模式
+    
+    Returns:
+        str: API密钥使用的邮箱域名后缀
+    """
     return DANSWER_API_KEY_DUMMY_EMAIL_DOMAIN
 
 
 def is_api_key_email_address(email: str) -> bool:
+    """检查给定的邮箱是否是API密钥关联的邮箱地址
+    
+    Args:
+        email: 需要检查的邮箱地址
+    Returns:
+        bool: 如果是API密钥邮箱则返回True，否则返回False
+    """
     return email.endswith(get_api_key_email_pattern())
 
 
 def fetch_api_keys(db_session: Session) -> list[ApiKeyDescriptor]:
+    """获取所有API密钥信息
+    
+    Args:
+        db_session: 数据库会话对象
+    Returns:
+        list[ApiKeyDescriptor]: API密钥描述符列表
+    """
     api_keys = (
         db_session.scalars(select(ApiKey).options(joinedload(ApiKey.user)))
         .unique()
@@ -49,8 +74,14 @@ def fetch_api_keys(db_session: Session) -> list[ApiKeyDescriptor]:
 async def fetch_user_for_api_key(
     hashed_api_key: str, async_db_session: AsyncSession
 ) -> User | None:
-    """NOTE: this is async, since it's used during auth
-    (which is necessarily async due to FastAPI Users)"""
+    """根据哈希后的API密钥获取关联用户
+    
+    Args:
+        hashed_api_key: 经过哈希处理的API密钥
+        async_db_session: 异步数据库会话对象
+    Returns:
+        User | None: 关联的用户对象，如果未找到则返回None
+    """
     return await async_db_session.scalar(
         select(User)
         .join(ApiKey, ApiKey.user_id == User.id)
@@ -62,12 +93,29 @@ def get_api_key_fake_email(
     name: str,
     unique_id: str,
 ) -> str:
+    """生成API密钥关联的虚拟邮箱地址
+    
+    Args:
+        name: API密钥名称
+        unique_id: 唯一标识符
+    Returns:
+        str: 生成的虚拟邮箱地址
+    """
     return f"{DANSWER_API_KEY_PREFIX}{name}@{unique_id}{DANSWER_API_KEY_DUMMY_EMAIL_DOMAIN}"
 
 
 def insert_api_key(
     db_session: Session, api_key_args: APIKeyArgs, user_id: uuid.UUID | None
 ) -> ApiKeyDescriptor:
+    """创建新的API密钥
+    
+    Args:
+        db_session: 数据库会话对象
+        api_key_args: API密钥创建参数
+        user_id: 创建者的用户ID
+    Returns:
+        ApiKeyDescriptor: 新创建的API密钥描述符
+    """
     std_password_helper = PasswordHelper()
 
     # Get tenant_id from context var (will be default schema for single tenant)
@@ -112,6 +160,18 @@ def insert_api_key(
 def update_api_key(
     db_session: Session, api_key_id: int, api_key_args: APIKeyArgs
 ) -> ApiKeyDescriptor:
+    """更新现有API密钥的信息
+    
+    Args:
+        db_session: 数据库会话对象
+        api_key_id: 要更新的API密钥ID
+        api_key_args: 更新参数
+    Returns:
+        ApiKeyDescriptor: 更新后的API密钥描述符
+    Raises:
+        ValueError: 当API密钥不存在时抛出
+        RuntimeError: 当API密钥没有关联用户时抛出
+    """
     existing_api_key = db_session.scalar(select(ApiKey).where(ApiKey.id == api_key_id))
     if existing_api_key is None:
         raise ValueError(f"API key with id {api_key_id} does not exist")
@@ -138,6 +198,17 @@ def update_api_key(
 
 
 def regenerate_api_key(db_session: Session, api_key_id: int) -> ApiKeyDescriptor:
+    """重新生成API密钥
+    
+    Args:
+        db_session: 数据库会话对象
+        api_key_id: 要重新生成的API密钥ID
+    Returns:
+        ApiKeyDescriptor: 重新生成后的API密钥描述符
+    Raises:
+        ValueError: 当API密钥不存在时抛出
+        RuntimeError: 当API密钥没有关联用户时抛出
+    """
     """NOTE: currently, any admin can regenerate any API key."""
     existing_api_key = db_session.scalar(select(ApiKey).where(ApiKey.id == api_key_id))
     if existing_api_key is None:
@@ -165,6 +236,14 @@ def regenerate_api_key(db_session: Session, api_key_id: int) -> ApiKeyDescriptor
 
 
 def remove_api_key(db_session: Session, api_key_id: int) -> None:
+    """删除指定的API密钥及其关联用户
+    
+    Args:
+        db_session: 数据库会话对象
+        api_key_id: 要删除的API密钥ID
+    Raises:
+        ValueError: 当API密钥或关联用户不存在时抛出
+    """
     existing_api_key = db_session.scalar(select(ApiKey).where(ApiKey.id == api_key_id))
     if existing_api_key is None:
         raise ValueError(f"API key with id {api_key_id} does not exist")
