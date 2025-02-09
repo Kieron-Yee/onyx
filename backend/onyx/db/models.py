@@ -608,7 +608,9 @@ class Document(Base):
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
 
     retrieval_feedbacks: Mapped[list["DocumentRetrievalFeedback"]] = relationship(
-        "Document", back_populates="retrieval_feedbacks"
+        "DocumentRetrievalFeedback",
+        back_populates="document",
+        primaryjoin="Document.id == DocumentRetrievalFeedback.document_id"
     )
     tags = relationship(
         "Tag",
@@ -1246,11 +1248,10 @@ class DocumentRetrievalFeedback(Base):
     __tablename__ = "document_retrieval_feedback"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[str] = mapped_column(ForeignKey("document.id"))
     chat_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("chat_message.id", ondelete="SET NULL"), nullable=True
     )
-    document_id: Mapped[str] = mapped_column(ForeignKey("document.id"))
-    # How high up this document is in the results, 1 for first
     document_rank: Mapped[int] = mapped_column(Integer)
     clicked: Mapped[bool] = mapped_column(Boolean, default=False)
     feedback: Mapped[SearchFeedbackType | None] = mapped_column(

@@ -1,3 +1,13 @@
+"""
+此文件是Celery主要工作进程的配置和初始化文件。
+主要功能包括：
+1. 配置和初始化Celery应用
+2. 设置各种信号处理器
+3. 管理Redis锁和清理操作
+4. 处理工作进程的启动和关闭
+5. 配置定期任务
+"""
+
 import logging
 import multiprocessing
 from typing import Any
@@ -55,6 +65,17 @@ def on_task_prerun(
     kwargs: dict | None = None,
     **kwds: Any,
 ) -> None:
+    """
+    任务执行前的信号处理函数
+    
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 位置参数
+        kwargs: 关键字参数
+        kwds: 额外关键字参数
+    """
     app_base.on_task_prerun(sender, task_id, task, args, kwargs, **kwds)
 
 
@@ -69,6 +90,19 @@ def on_task_postrun(
     state: str | None = None,
     **kwds: Any,
 ) -> None:
+    """
+    任务执行后的信号处理函数
+    
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 位置参数
+        kwargs: 关键字参数
+        retval: 返回值
+        state: 任务状态
+        kwds: 额外关键字参数
+    """
     app_base.on_task_postrun(sender, task_id, task, args, kwargs, retval, state, **kwds)
 
 
@@ -90,6 +124,7 @@ def on_worker_init(sender: Any, **kwargs: Any) -> None:
     app_base.wait_for_vespa(sender, **kwargs)
 
     # Less startup checks in multi-tenant case
+    # 多租户情况下减少启动检查
     if MULTI_TENANT:
         return
 
@@ -97,9 +132,11 @@ def on_worker_init(sender: Any, **kwargs: Any) -> None:
 
     # This is singleton work that should be done on startup exactly once
     # by the primary worker. This is unnecessary in the multi tenant scenario
+    # 这是在启动时由主工作进程执行的单例工作。在多租户场景下不需要
     r = get_redis_client(tenant_id=None)
 
     # Log the role and slave count - being connected to a slave or slave count > 0 could be problematic
+    # 记录角色和从节点数量 - 连接到从节点或从节点数量大于0可能会有问题
     info: dict[str, Any] = cast(dict, r.info("replication"))
     role: str = cast(str, info.get("role"))
     connected_slaves: int = info.get("connected_slaves", 0)
@@ -111,15 +148,20 @@ def on_worker_init(sender: Any, **kwargs: Any) -> None:
     # For the moment, we're assuming that we are the only primary worker
     # that should be running.
     # TODO: maybe check for or clean up another zombie primary worker if we detect it
+    # 目前，我们假设只有一个主工作进程在运行
+    # TODO: 如果检测到其他僵尸主工作进程，可能需要检查或清理
     r.delete(OnyxRedisLocks.PRIMARY_WORKER)
 
     # this process wide lock is taken to help other workers start up in order.
     # it is planned to use this lock to enforce singleton behavior on the primary
     # worker, since the primary worker does redis cleanup on startup, but this isn't
     # implemented yet.
+    # 这个进程范围的锁用于帮助其他工作进程按顺序启动
+    # 计划使用此锁来强制主工作进程的单例行为，因为主工作进程在启动时执行redis清理，但这尚未实现
 
     # set thread_local=False since we don't control what thread the periodic task might
     # reacquire the lock with
+    # 设置thread_local=False，因为我们无法控制周期任务可能在哪个线程中重新获取锁
     lock: RedisLock = r.lock(
         OnyxRedisLocks.PRIMARY_WORKER,
         timeout=CELERY_PRIMARY_WORKER_LOCK_TIMEOUT,
@@ -135,10 +177,12 @@ def on_worker_init(sender: Any, **kwargs: Any) -> None:
         raise WorkerShutdown("Primary worker lock could not be acquired!")
 
     # tacking on our own user data to the sender
+    # 将我们自己的用户数据附加到发送者
     sender.primary_worker_lock = lock
 
     # As currently designed, when this worker starts as "primary", we reinitialize redis
     # to a clean state (for our purposes, anyway)
+    # 按照当前设计，当这个工作进程作为"主"启动时，我们将redis重新初始化为干净状态（至少对我们的目的而言）
     r.delete(OnyxRedisLocks.CHECK_VESPA_SYNC_BEAT_LOCK)
     r.delete(OnyxRedisLocks.MONITOR_VESPA_SYNC_BEAT_LOCK)
 
@@ -162,6 +206,7 @@ def on_worker_init(sender: Any, **kwargs: Any) -> None:
     RedisConnectorExternalGroupSync.reset_all(r)
 
     # mark orphaned index attempts as failed
+    # 将孤立的索引尝试标记为失败
     with get_session_with_default_tenant() as db_session:
         unfenced_attempt_ids = get_unfenced_index_attempt_ids(db_session, r)
         for attempt_id in unfenced_attempt_ids:
@@ -196,39 +241,65 @@ def on_setup_logging(
     app_base.on_setup_logging(loglevel, logfile, format, colorize, **kwargs)
 
     # this can be spammy, so just enable it in the cloud for now
+    # 这可能会产生大量日志，所以目前只在云环境中启用
     if MULTI_TENANT:
         app_base.set_task_finished_log_level(logging.INFO)
 
 
 class HubPeriodicTask(bootsteps.StartStopStep):
-    """Regularly reacquires the primary worker lock outside of the task queue.
+    """
+    Regularly reacquires the primary worker lock outside of the task queue.
     Use the task_logger in this class to avoid double logging.
+    
+    定期在任务队列外重新获取主工作进程锁。
+    在这个类中使用task_logger以避免重复日志记录。
 
     This cannot be done inside a regular beat task because it must run on schedule and
     a queue of existing work would starve the task from running.
+    
+    这不能在常规的beat任务中完成，因为它必须按计划运行，
+    而现有工作队列会导致任务无法执行。
     """
 
-    # it's unclear to me whether using the hub's timer or the bootstep timer is better
     requires = {"celery.worker.components:Hub"}
 
     def __init__(self, worker: Any, **kwargs: Any) -> None:
-        self.interval = CELERY_PRIMARY_WORKER_LOCK_TIMEOUT / 8  # Interval in seconds
+        """
+        初始化周期任务
+        
+        参数:
+            worker: 工作进程对象
+            kwargs: 额外参数
+        """
+        self.interval = CELERY_PRIMARY_WORKER_LOCK_TIMEOUT / 8  # 间隔时间（秒）
         self.task_tref = None
 
     def start(self, worker: Any) -> None:
+        """
+        启动周期任务
+        
+        参数:
+            worker: 工作进程对象
+        """
         if not celery_is_worker_primary(worker):
             return
 
-        # Access the worker's event loop (hub)
-        hub = worker.consumer.controller.hub
+        hub = getattr(worker.consumer.controller, 'hub', None)  # 获取 hub
+        if hub is None:
+            task_logger.warning("Hub is not available, skipping periodic task scheduling.")
+            return
 
-        # Schedule the periodic task
-        self.task_tref = hub.call_repeatedly(
-            self.interval, self.run_periodic_task, worker
-        )
-        task_logger.info("Scheduled periodic task with hub.")
+        # 调度周期任务
+        self.task_tref = hub.call_repeatedly(self.interval, self.run_periodic_task, worker)
+        task_logger.info("计划的周期任务已启动。")
 
     def run_periodic_task(self, worker: Any) -> None:
+        """
+        执行周期任务
+        
+        参数:
+            worker: 工作进程对象
+        """
         try:
             if not celery_is_worker_primary(worker):
                 return
@@ -265,13 +336,18 @@ class HubPeriodicTask(bootsteps.StartStopStep):
                     raise TimeoutError("Primary worker lock could not be acquired!")
 
         except Exception:
-            task_logger.exception("Periodic task failed.")
+            task_logger.exception("周期任务失败。")
 
     def stop(self, worker: Any) -> None:
-        # Cancel the scheduled task when the worker stops
+        """
+        停止周期任务
+        
+        参数:
+            worker: 工作进程对象
+        """
         if self.task_tref:
             self.task_tref.cancel()
-            task_logger.info("Canceled periodic task with hub.")
+            task_logger.info("已取消计划的周期任务。")
 
 
 celery_app.steps["worker"].add(HubPeriodicTask)

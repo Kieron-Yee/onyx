@@ -1,3 +1,11 @@
+"""
+此文件是Celery应用程序的基础文件，主要功能包括：
+1. Celery任务的信号处理（如任务开始前、结束后等）
+2. 工作进程的初始化和就绪状态检查
+3. 日志系统的配置和管理
+4. 多租户上下文的处理
+"""
+
 import logging
 import multiprocessing
 import time
@@ -65,6 +73,17 @@ def on_task_prerun(
     kwargs: dict[str, Any] | None = None,
     **kwds: Any,
 ) -> None:
+    """
+    任务执行前的处理函数。当前为空实现，可用于后续扩展任务前的预处理逻辑。
+    
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 任务参数元组
+        kwargs: 任务关键字参数
+        kwds: 其他关键字参数
+    """
     pass
 
 
@@ -81,13 +100,30 @@ def on_task_postrun(
     """We handle this signal in order to remove completed tasks
     from their respective tasksets. This allows us to track the progress of document set
     and user group syncs.
+    
+    我们处理此信号以从各自的任务集中移除已完成的任务。这允许我们跟踪文档集和用户组同步的进度。
 
     This function runs after any task completes (both success and failure)
     Note that this signal does not fire on a task that failed to complete and is going
     to be retried.
+    
+    此函数在任务完成后运行（包括成功和失败）
+    注意：对于执行失败且将要重试的任务，此信号不会触发。
 
     This also does not fire if a worker with acks_late=False crashes (which all of our
     long running workers are)
+    
+    如果设置了acks_late=False的工作进程崩溃，此信号也不会触发（这适用于我们所有的长期运行工作进程）
+
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 任务参数元组
+        kwargs: 任务关键字参数
+        retval: 任务返回值
+        state: 任务状态
+        kwds: 其他关键字参数
     """
     if not task:
         return
@@ -101,6 +137,7 @@ def on_task_postrun(
         return
 
     # Get tenant_id directly from kwargs- each celery task has a tenant_id kwarg
+    # 直接从kwargs获取tenant_id - 每个celery任务都有一个tenant_id参数
     if not kwargs:
         logger.error(f"Task {task.name} (ID: {task_id}) is missing kwargs")
         tenant_id = None
@@ -162,13 +199,33 @@ def on_task_postrun(
 
 
 def on_celeryd_init(sender: Any = None, conf: Any = None, **kwargs: Any) -> None:
-    """The first signal sent on celery worker startup"""
-    multiprocessing.set_start_method("spawn")  # fork is unsafe, set to spawn
+    """The first signal sent on celery worker startup
+    
+    Celery工作进程启动时发送的第一个信号
+    
+    参数:
+        sender: 信号发送者
+        conf: Celery配置对象
+        kwargs: 其他参数
+    """
+    multiprocessing.set_start_method("spawn")  # fork is unsafe, set to spawn 
+    # fork模式不安全,设置为spawn模式
 
 
 def wait_for_redis(sender: Any, **kwargs: Any) -> None:
     """Waits for redis to become ready subject to a hardcoded timeout.
-    Will raise WorkerShutdown to kill the celery worker if the timeout is reached."""
+    Will raise WorkerShutdown to kill the celery worker if the timeout is reached.
+    
+    等待Redis就绪,受限于硬编码的超时时间。
+    如果达到超时时间,将抛出WorkerShutdown异常以终止Celery工作进程。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+        
+    异常:
+        WorkerShutdown: 当Redis连接超时时抛出
+    """
 
     r = get_redis_client(tenant_id=None)
 
@@ -210,7 +267,18 @@ def wait_for_redis(sender: Any, **kwargs: Any) -> None:
 
 def wait_for_db(sender: Any, **kwargs: Any) -> None:
     """Waits for the db to become ready subject to a hardcoded timeout.
-    Will raise WorkerShutdown to kill the celery worker if the timeout is reached."""
+    Will raise WorkerShutdown to kill the celery worker if the timeout is reached.
+    
+    等待数据库就绪,受限于硬编码的超时时间。
+    如果达到超时时间,将抛出WorkerShutdown异常以终止Celery工作进程。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+        
+    异常:
+        WorkerShutdown: 当数据库连接超时时抛出
+    """
 
     WAIT_INTERVAL = 5
     WAIT_LIMIT = 60
@@ -252,7 +320,18 @@ def wait_for_db(sender: Any, **kwargs: Any) -> None:
 
 def wait_for_vespa(sender: Any, **kwargs: Any) -> None:
     """Waits for Vespa to become ready subject to a hardcoded timeout.
-    Will raise WorkerShutdown to kill the celery worker if the timeout is reached."""
+    Will raise WorkerShutdown to kill the celery worker if the timeout is reached.
+    
+    等待Vespa就绪,受限于硬编码的超时时间。
+    如果达到超时时间,将抛出WorkerShutdown异常以终止Celery工作进程。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+        
+    异常:
+        WorkerShutdown: 当Vespa连接超时时抛出
+    """
 
     WAIT_INTERVAL = 5
     WAIT_LIMIT = 60
@@ -296,9 +375,21 @@ def wait_for_vespa(sender: Any, **kwargs: Any) -> None:
 
 
 def on_secondary_worker_init(sender: Any, **kwargs: Any) -> None:
+    """
+    初始化从工作进程的处理函数。
+    等待主工作进程就绪后才继续执行。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+        
+    异常:
+        WorkerShutdown: 当等待主工作进程超时时抛出
+    """
     logger.info("Running as a secondary celery worker.")
 
     # Set up variables for waiting on primary worker
+    # 设置等待主工作进程的变量
     WAIT_INTERVAL = 5
     WAIT_LIMIT = 60
     r = get_redis_client(tenant_id=None)
@@ -328,15 +419,32 @@ def on_secondary_worker_init(sender: Any, **kwargs: Any) -> None:
 
 
 def on_worker_ready(sender: Any, **kwargs: Any) -> None:
+    """
+    工作进程就绪时的处理函数。
+    仅记录一条日志信息。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+    """
     task_logger.info("worker_ready signal received.")
 
 
 def on_worker_shutdown(sender: Any, **kwargs: Any) -> None:
+    """
+    工作进程关闭时的处理函数。
+    主要用于释放主工作进程的锁。
+    
+    参数:
+        sender: 信号发送者
+        kwargs: 其他参数
+    """
     if not celery_is_worker_primary(sender):
         return
 
     if not hasattr(sender, "primary_worker_lock"):
         # primary_worker_lock will not exist when MULTI_TENANT is True
+        # 当MULTI_TENANT为True时，primary_worker_lock将不存在
         return
 
     if not sender.primary_worker_lock:
@@ -362,18 +470,32 @@ def on_setup_logging(
     colorize: bool,
     **kwargs: Any,
 ) -> None:
+    """
+    配置Celery的日志系统。
+    设置根日志记录器和任务日志记录器的处理程序、格式化器和日志级别。
+    
+    参数:
+        loglevel: 日志级别
+        logfile: 日志文件路径,如果为None则只输出到控制台
+        format: 日志格式字符串
+        colorize: 是否启用彩色日志输出
+        kwargs: 其他参数
+    """
     # TODO: could unhardcode format and colorize and accept these as options from
     # celery's config
+    # TODO: 可以将format和colorize参数从硬编码改为从celery配置中接收
 
     root_logger = logging.getLogger()
     root_logger.handlers = []
 
     # Define the log format
+    # 定义日志格式
     log_format = (
         "%(levelname)-8s %(asctime)s %(filename)15s:%(lineno)-4d: %(name)s %(message)s"
     )
 
     # Set up the root handler
+    # 设置根处理器
     root_handler = logging.StreamHandler()
     root_formatter = ColoredFormatter(
         log_format,
@@ -394,6 +516,7 @@ def on_setup_logging(
     root_logger.setLevel(loglevel)
 
     # Configure the task logger
+    # 配置任务日志记录器
     task_logger.handlers = []
 
     task_handler = logging.StreamHandler()
@@ -420,24 +543,49 @@ def on_setup_logging(
 
     # hide celery task received spam
     # e.g. "Task check_for_pruning[a1e96171-0ba8-4e00-887b-9fbf7442eab3] received"
+    # 隐藏celery任务接收垃圾日志
+    # 例如: "Task check_for_pruning[a1e96171-0ba8-4e00-887b-9fbf7442eab3] received"
     strategy.logger.setLevel(logging.WARNING)
 
     # uncomment this to hide celery task succeeded/failed spam
     # e.g. "Task check_for_pruning[a1e96171-0ba8-4e00-887b-9fbf7442eab3] succeeded in 0.03137450001668185s: None"
+    # 取消注释此行以隐藏celery任务成功/失败的垃圾日志
+    # 例如: "Task check_for_pruning[a1e96171-0ba8-4e00-887b-9fbf7442eab3] succeeded in 0.03137450001668185s: None"
     trace.logger.setLevel(logging.WARNING)
 
 
 def set_task_finished_log_level(logLevel: int) -> None:
-    """call this to override the setLevel in on_setup_logging. We are interested
-    in the task timings in the cloud but it can be spammy for self hosted."""
+    """
+    call this to override the setLevel in on_setup_logging. We are interested
+    in the task timings in the cloud but it can be spammy for self hosted.
+    
+    调用此函数来覆盖on_setup_logging中的setLevel设置。
+    我们在云环境中需要任务计时信息,但在自托管环境中可能会产生过多日志。
+    
+    参数:
+        logLevel: 要设置的日志级别
+    """
     trace.logger.setLevel(logLevel)
 
 
 class TenantContextFilter(logging.Filter):
-
-    """Logging filter to inject tenant ID into the logger's name."""
+    """
+    租户上下文过滤器，用于在日志记录中注入租户ID。
+    
+    此过滤器会将租户ID添加到日志记录器的名称中，便于区分不同租户的日志。
+    在多租户环境下特别有用。
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """
+        过滤日志记录并添加租户信息。
+        
+        参数:
+            record: 日志记录对象
+            
+        返回:
+            bool: 始终返回True，表示允许所有日志记录通过
+        """
         if not MULTI_TENANT:
             record.name = ""
             return True
@@ -451,7 +599,7 @@ class TenantContextFilter(logging.Filter):
         return True
 
 
-@task_prerun.connect
+@task_prerun.connect 
 def set_tenant_id(
     sender: Any | None = None,
     task_id: str | None = None,
@@ -460,7 +608,19 @@ def set_tenant_id(
     kwargs: dict[str, Any] | None = None,
     **other_kwargs: Any,
 ) -> None:
-    """Signal handler to set tenant ID in context var before task starts."""
+    """
+    Signal handler to set tenant ID in context var before task starts.
+    
+    任务开始前设置租户ID上下文变量的信号处理器。
+    
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 位置参数
+        kwargs: 关键字参数
+        other_kwargs: 其他参数
+    """
     tenant_id = (
         kwargs.get("tenant_id", POSTGRES_DEFAULT_SCHEMA)
         if kwargs
@@ -478,5 +638,17 @@ def reset_tenant_id(
     kwargs: dict[str, Any] | None = None,
     **other_kwargs: Any,
 ) -> None:
-    """Signal handler to reset tenant ID in context var after task ends."""
+    """
+    Signal handler to reset tenant ID in context var after task ends.
+    
+    任务结束后重置租户ID上下文变量的信号处理器。
+    
+    参数:
+        sender: 信号发送者
+        task_id: 任务ID
+        task: 任务对象
+        args: 位置参数
+        kwargs: 关键字参数
+        other_kwargs: 其他参数
+    """
     CURRENT_TENANT_ID_CONTEXTVAR.set(POSTGRES_DEFAULT_SCHEMA)

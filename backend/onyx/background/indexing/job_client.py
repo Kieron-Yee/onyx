@@ -3,7 +3,14 @@ Dask jobs behaved very strangely - they would die all the time, retries would
 not follow the expected behavior, etc.
 
 NOTE: cannot use Celery directly due to
-https://github.com/celery/celery/issues/7007#issuecomment-1740139367"""
+https://github.com/celery/celery/issues/7007#issuecomment-1740139367
+
+[中文说明]
+这是一个类似于Dask但更简单轻量的自定义客户端。
+之前使用Dask任务表现异常 - 经常会死掉，重试也没有按照预期行为执行等。
+
+注意：由于Celery的Issue #7007，无法直接使用Celery
+"""
 from collections.abc import Callable
 from dataclasses import dataclass
 from multiprocessing import Process
@@ -33,6 +40,18 @@ def _initializer(
 
     Based on SQLAlchemy's recommendations to handle multiprocessing:
     https://docs.sqlalchemy.org/en/20/core/pooling.html#using-connection-pools-with-multiprocessing-or-os-fork
+    
+    [中文说明]
+    使用新的SQLAlchemy引擎初始化子进程。
+    基于SQLAlchemy关于处理多进程的建议实现。
+    
+    参数:
+        func: 要执行的目标函数
+        args: 位置参数列表或元组
+        kwargs: 关键字参数字典，默认为None
+        
+    返回:
+        Any: 目标函数的执行结果
     """
     if kwargs is None:
         kwargs = {}
@@ -55,20 +74,45 @@ def _initializer(
 def _run_in_process(
     func: Callable, args: list | tuple, kwargs: dict[str, Any] | None = None
 ) -> None:
+    """在进程中运行初始化函数
+    
+    参数:
+        func: 要执行的目标函数
+        args: 位置参数列表或元组
+        kwargs: 关键字参数字典，默认为None
+    """
     _initializer(func, args, kwargs)
 
 
 @dataclass
 class SimpleJob:
-    """Drop in replacement for `dask.distributed.Future`"""
+    """Drop in replacement for `dask.distributed.Future`
+    
+    [中文说明]
+    用于替代`dask.distributed.Future`的简单作业类
+    
+    属性:
+        id: 作业ID
+        process: 进程对象，可选
+    """
 
     id: int
     process: Optional["Process"] = None
 
     def cancel(self) -> bool:
+        """取消当前作业
+        
+        返回:
+            bool: 是否成功取消作业
+        """
         return self.release()
 
     def release(self) -> bool:
+        """释放作业资源
+        
+        返回:
+            bool: 是否成功释放资源
+        """
         if self.process is not None and self.process.is_alive():
             self.process.terminate()
             return True
@@ -76,6 +120,11 @@ class SimpleJob:
 
     @property
     def status(self) -> JobStatusType:
+        """获取作业当前状态
+        
+        返回:
+            JobStatusType: 作业状态（pending/running/cancelled/error/finished）
+        """
         if not self.process:
             return "pending"
         elif self.process.is_alive():
@@ -88,6 +137,11 @@ class SimpleJob:
             return "finished"
 
     def done(self) -> bool:
+        """检查作业是否已完成
+        
+        返回:
+            bool: 作业是否已完成（包括完成、取消或出错状态）
+        """
         return (
             self.status == "finished"
             or self.status == "cancelled"
@@ -96,14 +150,28 @@ class SimpleJob:
 
     def exception(self) -> str:
         """Needed to match the Dask API, but not implemented since we don't currently
-        have a way to get back the exception information from the child process."""
+        have a way to get back the exception information from the child process.
+        
+        [中文说明]
+        为了匹配Dask API而需要实现的方法，但由于目前无法从子进程获取异常信息，所以未完全实现。
+        
+        返回:
+            str: 通用错误消息
+        """
         return (
             f"Job with ID '{self.id}' was killed or encountered an unhandled exception."
         )
 
 
 class SimpleJobClient:
-    """Drop in replacement for `dask.distributed.Client`"""
+    """Drop in replacement for `dask.distributed.Client`
+    
+    [中文说明]
+    用于替代`dask.distributed.Client`的简单作业客户端
+    
+    参数:
+        n_workers: 工作进程数量，默认为1
+    """
 
     def __init__(self, n_workers: int = 1) -> None:
         self.n_workers = n_workers
@@ -111,6 +179,7 @@ class SimpleJobClient:
         self.jobs: dict[int, SimpleJob] = {}
 
     def _cleanup_completed_jobs(self) -> None:
+        """清理已完成的作业"""
         current_job_ids = list(self.jobs.keys())
         for job_id in current_job_ids:
             job = self.jobs.get(job_id)
@@ -119,7 +188,19 @@ class SimpleJobClient:
                 del self.jobs[job.id]
 
     def submit(self, func: Callable, *args: Any, pure: bool = True) -> SimpleJob | None:
-        """NOTE: `pure` arg is needed so this can be a drop in replacement for Dask"""
+        """NOTE: `pure` arg is needed so this can be a drop in replacement for Dask
+        
+        [中文说明]
+        注意：需要`pure`参数以便可以直接替代Dask
+        
+        参数:
+            func: 要执行的函数
+            args: 传递给函数的位置参数
+            pure: 是否为纯函数（用于兼容Dask接口）
+            
+        返回:
+            SimpleJob | None: 作业对象，如果没有可用工作进程则返回None
+        """
         self._cleanup_completed_jobs()
         if len(self.jobs) >= self.n_workers:
             logger.debug(

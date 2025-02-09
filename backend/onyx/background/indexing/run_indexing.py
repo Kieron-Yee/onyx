@@ -41,8 +41,16 @@ from onyx.utils.variable_functionality import global_version
 
 logger = setup_logger()
 
+# 设置索引跟踪器打印条目数量
 INDEXING_TRACER_NUM_PRINT_ENTRIES = 5
 
+"""
+这个模块实现了文档索引的核心功能，包括:
+1. 从各种数据源获取文档
+2. 对文档进行嵌入处理
+3. 将处理后的文档存入索引系统
+4. 维护索引状态和进度
+"""
 
 def _get_connector_runner(
     db_session: Session,
@@ -53,10 +61,23 @@ def _get_connector_runner(
 ) -> ConnectorRunner:
     """
     NOTE: `start_time` and `end_time` are only used for poll connectors
-
+    注意：`start_time`和`end_time`仅用于轮询类型的连接器
+    
     Returns an iterator of document batches and whether the returned documents
     are the complete list of existing documents of the connector. If the task
     of type LOAD_STATE, the list will be considered complete and otherwise incomplete.
+    返回文档批次的迭代器，并指示返回的文档是否是连接器的完整文档列表。
+    如果任务类型是LOAD_STATE，则列表被视为完整，否则视为不完整。
+
+    参数:
+        db_session: 数据库会话对象
+        attempt: 索引尝试对象
+        start_time: 开始时间
+        end_time: 结束时间
+        tenant_id: 租户ID
+        
+    返回:
+        ConnectorRunner对象
     """
     task = attempt.connector_credential_pair.connector.input_type
 
@@ -92,6 +113,15 @@ def _get_connector_runner(
 
 
 def strip_null_characters(doc_batch: list[Document]) -> list[Document]:
+    """
+    清除文档中的空字符
+
+    参数:
+        doc_batch: 需要处理的文档列表
+        
+    返回:
+        清理后的文档列表
+    """
     cleaned_batch = []
     for doc in doc_batch:
         cleaned_doc = doc.model_copy()
@@ -121,7 +151,11 @@ def strip_null_characters(doc_batch: list[Document]) -> list[Document]:
 
 
 class ConnectorStopSignal(Exception):
-    """A custom exception used to signal a stop in processing."""
+    """
+    A custom exception used to signal a stop in processing.
+    用于发出处理停止信号的自定义异常。
+    """
+    pass
 
 
 def _run_indexing(
@@ -135,8 +169,19 @@ def _run_indexing(
     2. Embed and index these documents into the chosen datastore (vespa)
     3. Updates Postgres to record the indexed documents + the outcome of this run
 
+    1. 从指定应用获取新的或更新的文档
+    2. 将这些文档嵌入并索引到选定的数据存储(vespa)
+    3. 更新Postgres以记录已索引的文档和运行结果
+    
     TODO: do not change index attempt statuses here ... instead, set signals in redis
     and allow the monitor function to clean them up
+    待办：不要在这里更改索引尝试状态...而是在redis中设置信号，让监控函数来清理它们
+
+    参数:
+        db_session: 数据库会话
+        index_attempt: 索引尝试对象
+        tenant_id: 租户ID
+        callback: 索引心跳接口回调
     """
     start_time = time.time()
 
@@ -151,9 +196,12 @@ def _run_indexing(
 
     # Only update cc-pair status for primary index jobs
     # Secondary index syncs at the end when swapping
+    # 仅为主索引作业更新cc-pair状态
+    # 辅助索引在交换时同步
     is_primary = search_settings.status == IndexModelStatus.PRESENT
 
     # Indexing is only done into one index at a time
+    # 一次只能对一个索引进行索引操作
     document_index = get_default_document_index(
         primary_index_name=index_name, secondary_index_name=None
     )
@@ -305,12 +353,15 @@ def _run_indexing(
                 # of the transactions when computing `NOW()`, so if we have
                 # a long running transaction, the `time_updated` field will
                 # be inaccurate
+                # 提交事务，使下面的更新能够在全新的事务中开始
+                # Postgres在计算NOW()时使用事务开始时间，所以如果有长时间运行的事务，time_updated字段将不准确
                 db_session.commit()
 
                 if callback:
                     callback.progress("_run_indexing", len(doc_batch_cleaned))
 
                 # This new value is updated every batch, so UI can refresh per batch update
+                # 这个新值在每个批次都会更新，所以UI可以随每个批次更新而刷新
                 update_docs_indexed(
                     db_session=db_session,
                     index_attempt=index_attempt,
@@ -367,9 +418,13 @@ def _run_indexing(
                 # Otherwise, some progress was made - the next run will not start from the beginning.
                 # In this case, it is not accurate to mark it as a failure. When the next run begins,
                 # if that fails immediately, it will be marked as a failure.
-                #
+                # 只有在第一个索引窗口就失败时才标记为完全失败
+                # 否则说明已经有一些进度了 - 下次运行不会从头开始
+                # 在这种情况下，标记为失败是不准确的。当下次运行开始时，如果立即失败，它将被标记为失败。
+
                 # NOTE: if the connector is manually disabled, we should mark it as a failure regardless
                 # to give better clarity in the UI, as the next run will never happen.
+                # 注意：如果连接器被手动禁用，我们应该将其标记为失败，以在UI中提供更好的清晰度，因为下一次运行永远不会发生。
                 if (
                     ind == 0
                     or not db_cc_pair.status.is_active()
@@ -396,6 +451,7 @@ def _run_indexing(
 
             # break => similar to success case. As mentioned above, if the next run fails for the same
             # reason it will then be marked as a failure
+            # break => 类似于成功情况。如上所述，如果下一次运行因相同原因失败，则它将被标记为失败
             break
 
     if INDEXING_TRACER_INTERVAL > 0:
@@ -470,12 +526,23 @@ def run_indexing_entrypoint(
     is_ee: bool = False,
     callback: IndexingHeartbeatInterface | None = None,
 ) -> None:
+    """
+    索引处理的入口函数
+
+    参数:
+        index_attempt_id: 索引尝试ID
+        tenant_id: 租户ID
+        connector_credential_pair_id: 连接器凭证对ID
+        is_ee: 是否是企业版
+        callback: 索引心跳接口回调
+    """
     try:
         if is_ee:
             global_version.set_ee()
 
         # set the indexing attempt ID so that all log messages from this process
         # will have it added as a prefix
+        # 设置索引尝试ID，以便此进程的所有日志消息都会添加它作为前缀
         TaskAttemptSingleton.set_cc_and_index_id(
             index_attempt_id, connector_credential_pair_id
         )

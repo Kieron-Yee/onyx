@@ -72,7 +72,7 @@ LOG_FILE_NAME = os.environ.get("LOG_FILE_NAME") or "onyx"  # 日志文件名称
 DEV_LOGGING_ENABLED = os.environ.get("DEV_LOGGING_ENABLED", "").lower() == "true"  # 是否启用开发环境日志
 # notset, debug, info, notice, warning, error, or critical
 # 日志级别：notset, debug, info, notice, warning, error, 或 critical
-LOG_LEVEL = os.environ.get("LOG_LEVEL", "info")  # 日志记录级别
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "debug")  # 日志记录级别
 
 # Timeout for API-based embedding models
 # API嵌入模型的超时时间

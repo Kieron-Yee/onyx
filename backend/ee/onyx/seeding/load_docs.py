@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 from typing import cast
 from typing import List
 
@@ -11,7 +12,8 @@ Embedding = List[float]
 
 
 def load_processed_docs(cohere_enabled: bool) -> list[dict]:
-    base_path = os.path.join(os.getcwd(), "onyx", "seeding")
+    work_dir = Path(__file__).resolve().parent.parent.parent.parent
+    base_path = os.path.join(work_dir, "onyx", "seeding")
 
     if cohere_enabled and COHERE_DEFAULT_API_KEY:
         initial_docs_path = os.path.join(base_path, "initial_docs_cohere.json")

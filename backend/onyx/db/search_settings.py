@@ -36,20 +36,19 @@ from shared_configs.enums import EmbeddingProvider
 
 logger = setup_logger()
 
-"""
-创建搜索设置
-参数：
-    search_settings: 保存的搜索设置
-    db_session: 数据库会话
-    status: 索引模型状态，默认为FUTURE
-返回：
-    创建的SearchSettings对象
-"""
 def create_search_settings(
     search_settings: SavedSearchSettings,
     db_session: Session,
     status: IndexModelStatus = IndexModelStatus.FUTURE,
 ) -> SearchSettings:
+    """创建搜索设置
+    参数：
+        search_settings: 保存的搜索设置
+        db_session: 数据库会话
+        status: 索引模型状态，默认为FUTURE
+    返回：
+        创建的SearchSettings对象
+    """
     embedding_model = SearchSettings(
         model_name=search_settings.model_name,
         model_dim=search_settings.model_dim,
@@ -73,33 +72,31 @@ def create_search_settings(
 
     return embedding_model
 
-"""
-根据提供商类型获取嵌入提供商
-参数：
-    db_session: 数据库会话
-    provider_type: 提供商类型
-返回：
-    CloudEmbeddingProvider对象或None
-"""
 def get_embedding_provider_from_provider_type(
     db_session: Session, provider_type: EmbeddingProvider
 ) -> CloudEmbeddingProvider | None:
+    """根据提供商类型获取嵌入提供商
+    参数：
+        db_session: 数据库会话
+        provider_type: 提供商类型
+    返回：
+        CloudEmbeddingProvider对象或None
+    """
     query = select(CloudEmbeddingProvider).where(
         CloudEmbeddingProvider.provider_type == provider_type
     )
     provider = db_session.execute(query).scalars().first()
     return provider if provider else None
 
-"""
-获取当前数据库中的嵌入提供商
-参数：
-    db_session: 数据库会话
-返回：
-    ServerCloudEmbeddingProvider对象或None
-"""
 def get_current_db_embedding_provider(
     db_session: Session,
 ) -> ServerCloudEmbeddingProvider | None:
+    """获取当前数据库中的嵌入提供商
+    参数：
+        db_session: 数据库会话
+    返回：
+        ServerCloudEmbeddingProvider对象或None
+    """
     search_settings = get_current_search_settings(db_session=db_session)
 
     if search_settings.provider_type is None:
@@ -118,13 +115,12 @@ def get_current_db_embedding_provider(
 
     return current_embedding_provider
 
-"""
-删除指定的搜索设置
-参数：
-    db_session: 数据库会话
-    search_settings_id: 要删除的搜索设置ID
-"""
 def delete_search_settings(db_session: Session, search_settings_id: int) -> None:
+    """删除指定的搜索设置
+    参数：
+        db_session: 数据库会话
+        search_settings_id: 要删除的搜索设置ID
+    """
     current_settings = get_current_search_settings(db_session)
 
     if current_settings.id == search_settings_id:
@@ -147,14 +143,13 @@ def delete_search_settings(db_session: Session, search_settings_id: int) -> None
     db_session.execute(search_settings_query)
     db_session.commit()
 
-"""
-获取当前生效的搜索设置
-参数：
-    db_session: 数据库会话
-返回：
-    当前活动的SearchSettings对象
-"""
 def get_current_search_settings(db_session: Session) -> SearchSettings:
+    """获取当前生效的搜索设置
+    参数：
+        db_session: 数据库会话
+    返回：
+        当前活动的SearchSettings对象
+    """
     query = (
         select(SearchSettings)
         .where(SearchSettings.status == IndexModelStatus.PRESENT)
@@ -167,14 +162,13 @@ def get_current_search_settings(db_session: Session) -> SearchSettings:
         raise RuntimeError("No search settings specified, DB is not in a valid state")
     return latest_settings
 
-"""
-获取次要搜索设置（处于FUTURE状态的设置）
-参数：
-    db_session: 数据库会话
-返回：
-    次要SearchSettings对象或None
-"""
 def get_secondary_search_settings(db_session: Session) -> SearchSettings | None:
+    """获取次要搜索设置（处于FUTURE状态的设置）
+    参数：
+        db_session: 数据库会话
+    返回：
+        次要SearchSettings对象或None
+    """
     query = (
         select(SearchSettings)
         .where(SearchSettings.status == IndexModelStatus.FUTURE)
@@ -185,21 +179,17 @@ def get_secondary_search_settings(db_session: Session) -> SearchSettings | None:
 
     return latest_settings
 
-"""
-获取所有活动的搜索设置
-返回的列表中第一个永远是当前搜索设置，如果有正在迁移的新设置会作为第二个条目
-Returns active search settings. The first entry will always be the current search 
-settings. If there are new search settings that are being migrated to, those will be 
-the second entry.
-参数：
-    db_session: 数据库会话
-返回：
-    活动搜索设置列表
-"""
 def get_active_search_settings(db_session: Session) -> list[SearchSettings]:
-    """Returns active search settings. The first entry will always be the current search
-    settings. If there are new search settings that are being migrated to, those will be
-    the second entry."""
+    """获取所有活动的搜索设置
+    返回的列表中第一个永远是当前搜索设置，如果有正在迁移的新设置会作为第二个条目
+    Returns active search settings. The first entry will always be the current search 
+    settings. If there are new search settings that are being migrated to, those will be 
+    the second entry.
+    参数：
+        db_session: 数据库会话
+    返回：
+        活动搜索设置列表
+    """
     search_settings_list: list[SearchSettings] = []
 
     # Get the primary search settings
@@ -214,27 +204,25 @@ def get_active_search_settings(db_session: Session) -> list[SearchSettings]:
 
     return search_settings_list
 
-"""
-获取所有搜索设置
-参数:
-    db_session: 数据库会话
-返回:
-    所有搜索设置的列表
-"""
 def get_all_search_settings(db_session: Session) -> list[SearchSettings]:
+    """获取所有搜索设置
+    参数:
+        db_session: 数据库会话
+    返回:
+        所有搜索设置的列表
+    """
     query = select(SearchSettings).order_by(SearchSettings.id.desc())
     result = db_session.execute(query)
     all_settings = result.scalars().all()
     return list(all_settings)
 
-"""
-获取多语言扩展设置
-参数:
-    db_session: 可选的数据库会话参数
-返回:
-    多语言扩展列表
-"""
 def get_multilingual_expansion(db_session: Session | None = None) -> list[str]:
+    """获取多语言扩展设置
+    参数:
+        db_session: 可选的数据库会话参数
+    返回:
+        多语言扩展列表
+    """
     if db_session is None:
         with get_session_with_default_tenant() as db_session:
             search_settings = get_current_search_settings(db_session)
@@ -244,34 +232,32 @@ def get_multilingual_expansion(db_session: Session | None = None) -> list[str]:
         return []
     return search_settings.multilingual_expansion
 
-"""
-更新搜索设置的具体字段
-参数:
-    current_settings: 当前的搜索设置
-    updated_settings: 更新的搜索设置
-    preserved_fields: 需要保留的字段列表
-"""
 def update_search_settings(
     current_settings: SearchSettings,
     updated_settings: SavedSearchSettings,
     preserved_fields: list[str],
 ) -> None:
+    """更新搜索设置的具体字段
+    参数:
+        current_settings: 当前的搜索设置
+        updated_settings: 更新的搜索设置
+        preserved_fields: 需要保留的字段列表
+    """
     for field, value in updated_settings.dict().items():
         if field not in preserved_fields:
             setattr(current_settings, field, value)
 
-"""
-更新当前活动的搜索设置
-参数:
-    db_session: 数据库会话
-    search_settings: 要更新的搜索设置
-    preserved_fields: 需要保留的字段列表，默认使用PRESERVED_SEARCH_FIELDS
-"""
 def update_current_search_settings(
     db_session: Session,
     search_settings: SavedSearchSettings,
     preserved_fields: list[str] = PRESERVED_SEARCH_FIELDS,
 ) -> None:
+    """更新当前活动的搜索设置
+    参数:
+        db_session: 数据库会话
+        search_settings: 要更新的搜索设置
+        preserved_fields: 需要保留的字段列表，默认使用PRESERVED_SEARCH_FIELDS
+    """
     current_settings = get_current_search_settings(db_session)
     if not current_settings:
         logger.warning("No current search settings found to update")
@@ -289,18 +275,17 @@ def update_current_search_settings(
     db_session.commit()
     logger.info("Current search settings updated successfully")
 
-"""
-更新次要搜索设置
-参数:
-    db_session: 数据库会话
-    search_settings: 要更新的搜索设置
-    preserved_fields: 需要保留的字段列表，默认使用PRESERVED_SEARCH_FIELDS
-"""
 def update_secondary_search_settings(
     db_session: Session,
     search_settings: SavedSearchSettings,
     preserved_fields: list[str] = PRESERVED_SEARCH_FIELDS,
 ) -> None:
+    """更新次要搜索设置
+    参数:
+        db_session: 数据库会话
+        search_settings: 要更新的搜索设置
+        preserved_fields: 需要保留的字段列表，默认使用PRESERVED_SEARCH_FIELDS
+    """
     secondary_settings = get_secondary_search_settings(db_session)
     if not secondary_settings:
         logger.warning("No secondary search settings found to update")
@@ -312,33 +297,30 @@ def update_secondary_search_settings(
     db_session.commit()
     logger.info("Secondary search settings updated successfully")
 
-"""
-更新搜索设置的状态
-参数:
-    search_settings: 要更新的搜索设置
-    new_status: 新的状态值
-    db_session: 数据库会话
-"""
 def update_search_settings_status(
     search_settings: SearchSettings, new_status: IndexModelStatus, db_session: Session
 ) -> None:
+    """更新搜索设置的状态
+    参数:
+        search_settings: 要更新的搜索设置
+        new_status: 新的状态值
+        db_session: 数据库会话
+    """
     search_settings.status = new_status
     db_session.commit()
 
-"""
-检查用户是否覆盖了默认的嵌入模型设置
-返回:
-    布尔值，表示是否覆盖了默认设置
-"""
 def user_has_overridden_embedding_model() -> bool:
+    """检查用户是否覆盖了默认的嵌入模型设置
+    返回:
+        布尔值，表示是否覆盖了默认设置
+    """
     return DOCUMENT_ENCODER_MODEL != DEFAULT_DOCUMENT_ENCODER_MODEL
 
-"""
-获取旧的默认搜索设置
-返回:
-    包含旧默认配置的SearchSettings对象
-"""
 def get_old_default_search_settings() -> SearchSettings:
+    """获取旧的默认搜索设置
+    返回:
+        包含旧默认配置的SearchSettings对象
+    """
     is_overridden = user_has_overridden_embedding_model()
     return SearchSettings(
         model_name=(
@@ -360,14 +342,13 @@ def get_old_default_search_settings() -> SearchSettings:
         index_name="danswer_chunk",
     )
 
-"""
-获取新的默认搜索设置
-参数:
-    is_present: 是否为当前激活状态
-返回:
-    包含新默认配置的SearchSettings对象
-"""
 def get_new_default_search_settings(is_present: bool) -> SearchSettings:
+    """获取新的默认搜索设置
+    参数:
+        is_present: 是否为当前激活状态
+    返回:
+        包含新默认配置的SearchSettings对象
+    """
     return SearchSettings(
         model_name=DOCUMENT_ENCODER_MODEL,
         model_dim=DOC_EMBEDDING_DIM,
@@ -378,12 +359,11 @@ def get_new_default_search_settings(is_present: bool) -> SearchSettings:
         index_name=f"danswer_chunk_{clean_model_name(DOCUMENT_ENCODER_MODEL)}",
     )
 
-"""
-获取旧的默认嵌入模型设置
-返回:
-    包含旧默认嵌入模型配置的IndexingSetting对象
-"""
 def get_old_default_embedding_model() -> IndexingSetting:
+    """获取旧的默认嵌入模型设置
+    返回:
+        包含旧默认嵌入模型配置的IndexingSetting对象
+    """
     is_overridden = user_has_overridden_embedding_model()
     return IndexingSetting(
         model_name=(
@@ -406,12 +386,11 @@ def get_old_default_embedding_model() -> IndexingSetting:
         api_url=None,
     )
 
-"""
-获取新的默认嵌入模型设置
-返回:
-    包含新默认嵌入模型配置的IndexingSetting对象
-"""
 def get_new_default_embedding_model() -> IndexingSetting:
+    """获取新的默认嵌入模型设置
+    返回:
+        包含新默认嵌入模型配置的IndexingSetting对象
+    """
     return IndexingSetting(
         model_name=DOCUMENT_ENCODER_MODEL,
         model_dim=DOC_EMBEDDING_DIM,

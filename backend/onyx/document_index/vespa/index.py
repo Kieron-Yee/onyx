@@ -25,6 +25,7 @@ from datetime import timedelta
 from typing import BinaryIO
 from typing import cast
 from typing import List
+from pathlib import Path
 
 import httpx  # type: ignore
 import requests  # type: ignore
@@ -227,8 +228,9 @@ class VespaIndex(DocumentIndex):
         deploy_url = f"{VESPA_APPLICATION_ENDPOINT}/tenant/default/prepareandactivate"
         logger.notice(f"Deploying Vespa application package to {deploy_url}")
 
+        work_dir = Path(__file__).parent.parent.parent.parent
         vespa_schema_path = os.path.join(
-            os.getcwd(), "onyx", "document_index", "vespa", "app_config"
+            work_dir, "onyx","document_index", "vespa", "app_config"
         )
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         services_file = os.path.join(vespa_schema_path, "services.xml")
@@ -320,8 +322,9 @@ class VespaIndex(DocumentIndex):
         deploy_url = f"{VESPA_APPLICATION_ENDPOINT}/tenant/default/prepareandactivate"
         logger.info(f"Deploying Vespa application package to {deploy_url}")
 
+        work_dir = Path(__file__).parent.parent.parent.parent
         vespa_schema_path = os.path.join(
-            os.getcwd(), "onyx", "document_index", "vespa", "app_config"
+            work_dir, "onyx","document_index", "vespa", "app_config"
         )
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         services_file = os.path.join(vespa_schema_path, "services.xml")

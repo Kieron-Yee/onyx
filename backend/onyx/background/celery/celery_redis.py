@@ -1,4 +1,14 @@
+"""
+这个文件包含了一系列用于在Redis中处理Celery任务的辅助函数。
+主要功能包括：
+- 检查未确认任务的数量和ID
+- 获取任务队列长度
+- 查找特定任务
+- 检查worker状态和任务状态
+"""
+
 # These are helper objects for tracking the keys we need to write in redis
+# 这些是用于跟踪我们需要在redis中写入的键的辅助对象
 import json
 from typing import Any
 from typing import cast
@@ -17,7 +27,16 @@ def celery_get_unacked_length(r: Redis) -> int:
     There can be other tasks in here besides indexing tasks, so this is mostly useful
     just to see if the task count is non zero.
 
+    检查未确认队列很有用，因为非零长度表明可能存在预取的任务。
+
+    除了索引任务之外，这里可能还有其他任务，所以这主要用于查看任务计数是否非零。
+
     ref: https://blog.hikaru.run/2022/08/29/get-waiting-tasks-count-in-celery.html
+
+    参数:
+        r: Redis连接实例
+    返回值:
+        未确认队列的长度
     """
     length = cast(int, r.hlen("unacked"))
     return length
@@ -28,6 +47,16 @@ def celery_get_unacked_task_ids(queue: str, r: Redis) -> set[str]:
 
     Unacked entries belonging to the indexing queue are "prefetched", so this gives
     us crucial visibility as to what tasks are in that state.
+
+    获取未确认哈希中与给定队列匹配的任务ID集合。
+
+    属于索引队列的未确认条目是"预取"的，因此这让我们能够清楚地了解处于该状态的任务。
+
+    参数:
+        queue: 队列名称
+        r: Redis连接实例
+    返回值:
+        未确认任务ID的集合
     """
     tasks: set[str] = set()
 
@@ -55,7 +84,18 @@ def celery_get_queue_length(queue: str, r: Redis) -> int:
     """This is a redis specific way to get the length of a celery queue.
     It is priority aware and knows how to count across the multiple redis lists
     used to implement task prioritization.
-    This operation is not atomic."""
+    This operation is not atomic.
+
+    这是一个Redis特定的方法，用于获取Celery队列的长度。
+    它能够识别优先级，并知道如何统计用于实现任务优先级的多个Redis列表。
+    这个操作不是原子性的。
+
+    参数:
+        queue: 队列名称
+        r: Redis连接实例
+    返回值:
+        队列的总长度
+    """
     total_length = 0
     for i in range(len(OnyxCeleryPriority)):
         queue_name = queue
@@ -75,9 +115,16 @@ def celery_find_task(task_id: str, queue: str, r: Redis) -> int:
     used to implement task prioritization.
     This operation is not atomic.
 
-    This is a linear search O(n) ... so be careful using it when the task queues can be larger.
+    这是一个Redis特定的方法，用于在Redis中查找特定队列的任务。
+    它能够识别优先级，并知道如何查找用于实现任务优先级的多个Redis列表。
+    这个操作不是原子性的。
 
-    Returns true if the id is in the queue, False if not.
+    参数:
+        task_id: 要查找的任务ID
+        queue: 队列名称
+        r: Redis连接实例
+    返回值:
+        如果任务ID在队列中存在则返回True，否则返回False
     """
     for priority in range(len(OnyxCeleryPriority)):
         queue_name = f"{queue}{CELERY_SEPARATOR}{priority}" if priority > 0 else queue
@@ -95,9 +142,20 @@ def celery_inspect_get_workers(name_filter: str | None, app: Celery) -> list[str
     """Returns a list of current workers containing name_filter, or all workers if
     name_filter is None.
 
+    返回包含name_filter的当前worker列表，如果name_filter为None则返回所有worker。
+
     We've empirically discovered that the celery inspect API is potentially unstable
     and may hang or return empty results when celery is under load. Suggest using this
     more to debug and troubleshoot than in production code.
+
+    我们通过经验发现，当Celery负载较高时，inspect API可能不稳定，可能会挂起或返回空结果。
+    建议将其更多地用于调试和故障排除，而不是在生产代码中使用。
+
+    参数:
+        name_filter: worker名称过滤器
+        app: Celery应用实例
+    返回值:
+        匹配的worker名称列表
     """
     worker_names: list[str] = []
 
@@ -123,9 +181,20 @@ def celery_inspect_get_workers(name_filter: str | None, app: Celery) -> list[str
 def celery_inspect_get_reserved(worker_names: list[str], app: Celery) -> set[str]:
     """Returns a list of reserved tasks on the specified workers.
 
+    返回指定worker上的预留任务列表。
+
     We've empirically discovered that the celery inspect API is potentially unstable
     and may hang or return empty results when celery is under load. Suggest using this
     more to debug and troubleshoot than in production code.
+
+    我们通过经验发现，当Celery负载较高时，inspect API可能不稳定，可能会挂起或返回空结果。
+    建议将其更多地用于调试和故障排除，而不是在生产代码中使用。
+
+    参数:
+        worker_names: worker名称列表
+        app: Celery应用实例
+    返回值:
+        预留任务ID的集合
     """
     reserved_task_ids: set[str] = set()
 
@@ -144,9 +213,20 @@ def celery_inspect_get_reserved(worker_names: list[str], app: Celery) -> set[str
 def celery_inspect_get_active(worker_names: list[str], app: Celery) -> set[str]:
     """Returns a list of active tasks on the specified workers.
 
+    返回指定worker上的活动任务列表。
+
     We've empirically discovered that the celery inspect API is potentially unstable
     and may hang or return empty results when celery is under load. Suggest using this
     more to debug and troubleshoot than in production code.
+
+    我们通过经验发现，当Celery负载较高时，inspect API可能不稳定，可能会挂起或返回空结果。
+    建议将其更多地用于调试和故障排除，而不是在生产代码中使用。
+
+    参数:
+        worker_names: worker名称列表
+        app: Celery应用实例
+    返回值:
+        活动任务ID的集合
     """
     active_task_ids: set[str] = set()
 

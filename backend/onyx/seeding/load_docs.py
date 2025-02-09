@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 from typing import cast
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -127,8 +128,9 @@ def load_processed_docs(cohere_enabled: bool) -> list[dict]:
     返回:
         list[dict]: 预处理文档的列表
     """
+    work_dir = Path(__file__).resolve().parent.parent.parent
     initial_docs_path = os.path.join(
-        os.getcwd(),
+        work_dir,
         "onyx",
         "seeding",
         "initial_docs.json",

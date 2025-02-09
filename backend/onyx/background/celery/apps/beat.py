@@ -1,3 +1,11 @@
+"""
+该文件实现了一个动态租户调度器，用于管理Celery定时任务。
+主要功能：
+1. 动态管理多租户的定时任务
+2. 定期更新任务调度
+3. 处理任务配置和同步
+"""
+
 from datetime import timedelta
 from typing import Any
 
@@ -21,36 +29,58 @@ celery_app.config_from_object("onyx.background.celery.configs.beat")
 
 
 class DynamicTenantScheduler(PersistentScheduler):
+    """
+    动态租户调度器类，继承自PersistentScheduler
+    用于管理多租户环境下的定时任务调度
+    """
+    
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        logger.info("Initializing DynamicTenantScheduler")
+        """
+        初始化动态租户调度器
+        参数:
+            args: 可变位置参数
+            kwargs: 可变关键字参数
+        """
+        logger.info("Initializing DynamicTenantScheduler")  # 正在初始化动态租户调度器
         super().__init__(*args, **kwargs)
-        self._reload_interval = timedelta(minutes=2)
+        self._reload_interval = timedelta(minutes=2)  # 设置重载间隔为2分钟
         self._last_reload = self.app.now() - self._reload_interval
-        # Let the parent class handle store initialization
         self.setup_schedule()
         self._update_tenant_tasks()
-        logger.info(f"Set reload interval to {self._reload_interval}")
+        logger.info(f"Set reload interval to {self._reload_interval}")  # 设置重载间隔完成
 
     def setup_schedule(self) -> None:
-        logger.info("Setting up initial schedule")
+        """
+        初始化调度计划
+        """
+        logger.info("Setting up initial schedule")  # 正在设置初始调度计划
         super().setup_schedule()
-        logger.info("Initial schedule setup complete")
+        logger.info("Initial schedule setup complete")  # 初始调度计划设置完成
 
     def tick(self) -> float:
+        """
+        执行调度器的定时检查
+        返回值：
+            float: 下次检查的间隔时间
+        """
         retval = super().tick()
         now = self.app.now()
         if (
             self._last_reload is None
             or (now - self._last_reload) > self._reload_interval
         ):
-            logger.info("Reload interval reached, initiating task update")
+            logger.info("Reload interval reached, initiating task update")  # 达到重载间隔，开始更新任务
             self._update_tenant_tasks()
             self._last_reload = now
-            logger.info("Task update completed, reset reload timer")
+            logger.info("Task update completed, reset reload timer")  # 任务更新完成，重置计时器
         return retval
 
     def _update_tenant_tasks(self) -> None:
-        logger.info("Starting task update process")
+        """
+        更新租户任务
+        负责获取所有租户ID并更新对应的任务调度
+        """
+        logger.info("Starting task update process")  # 开始任务更新进程
         try:
             logger.info("Fetching all IDs")
             tenant_ids = get_all_tenant_ids()
@@ -136,20 +166,34 @@ class DynamicTenantScheduler(PersistentScheduler):
     def _should_update_schedule(
         self, current_schedule: dict, new_schedule: dict
     ) -> bool:
-        """Compare schedules to determine if an update is needed."""
-        logger.debug("Comparing current and new schedules")
+        """
+        比较当前调度计划和新调度计划，判断是否需要更新
+        参数:
+            current_schedule: 当前的调度计划
+            new_schedule: 新的调度计划
+        返回值:
+            bool: 是否需要更新调度计划
+        """
+        logger.debug("Comparing current and new schedules")  # 正在比较当前和新的调度计划
         current_tasks = set(name for name, _ in current_schedule)
         new_tasks = set(new_schedule.keys())
         needs_update = current_tasks != new_tasks
-        logger.debug(f"Schedule update needed: {needs_update}")
+        logger.debug(f"Schedule update needed: {needs_update}")  # 是否需要更新调度计划
         return needs_update
 
 
 @beat_init.connect
 def on_beat_init(sender: Any, **kwargs: Any) -> None:
-    logger.info("beat_init signal received.")
+    """
+    Beat初始化信号处理函数
+    参数:
+        sender: 信号发送者
+        kwargs: 附加参数
+    """
+    logger.info("beat_init signal received.")  # 收到beat_init信号
 
     # Celery beat shouldn't touch the db at all. But just setting a low minimum here.
+    # Celery beat不应该直接操作数据库，这里只设置最小连接数
     SqlEngine.set_app_name(POSTGRES_CELERY_BEAT_APP_NAME)
     SqlEngine.init_engine(pool_size=2, max_overflow=0)
 
@@ -160,7 +204,17 @@ def on_beat_init(sender: Any, **kwargs: Any) -> None:
 def on_setup_logging(
     loglevel: Any, logfile: Any, format: Any, colorize: Any, **kwargs: Any
 ) -> None:
+    """
+    日志设置信号处理函数
+    参数:
+        loglevel: 日志级别
+        logfile: 日志文件
+        format: 日志格式
+        colorize: 是否着色
+        kwargs: 附加参数
+    """
     app_base.on_setup_logging(loglevel, logfile, format, colorize, **kwargs)
 
 
+# 设置Celery应用的调度器为DynamicTenantScheduler
 celery_app.conf.beat_scheduler = DynamicTenantScheduler

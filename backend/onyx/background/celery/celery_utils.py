@@ -1,3 +1,8 @@
+"""
+此文件包含了Celery相关的实用工具函数，主要用于处理任务队列状态、文档删除操作、
+文档ID提取以及Celery worker状态检查等功能。
+"""
+
 from datetime import datetime
 from datetime import timezone
 from typing import Any
@@ -33,6 +38,18 @@ def _get_deletion_status(
 ) -> TaskQueueState | None:
     """We no longer store TaskQueueState in the DB for a deletion attempt.
     This function populates TaskQueueState by just checking redis.
+    
+    我们不再在数据库中存储删除尝试的TaskQueueState。
+    此函数通过检查redis来填充TaskQueueState。
+    
+    参数:
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        db_session: 数据库会话
+        tenant_id: 租户ID，可选
+        
+    返回:
+        TaskQueueState对象或None
     """
     cc_pair = get_connector_credential_pair(
         connector_id=connector_id, credential_id=credential_id, db_session=db_session
@@ -57,6 +74,18 @@ def get_deletion_attempt_snapshot(
     db_session: Session,
     tenant_id: str | None = None,
 ) -> DeletionAttemptSnapshot | None:
+    """
+    获取删除尝试的快照信息
+    
+    参数:
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        db_session: 数据库会话
+        tenant_id: 租户ID，可选
+        
+    返回:
+        DeletionAttemptSnapshot对象或None
+    """
     deletion_task = _get_deletion_status(
         connector_id, credential_id, db_session, tenant_id
     )
@@ -73,6 +102,14 @@ def get_deletion_attempt_snapshot(
 def document_batch_to_ids(
     doc_batch: list[Document],
 ) -> set[str]:
+    """
+    将文档批次转换为ID集合
+    
+    参数:
+        doc_batch: 文档对象列表
+    返回:
+        文档ID集合
+    """
     return {doc.id for doc in doc_batch}
 
 
@@ -80,11 +117,23 @@ def extract_ids_from_runnable_connector(
     runnable_connector: BaseConnector,
     callback: IndexingHeartbeatInterface | None = None,
 ) -> set[str]:
-    """
-    If the SlimConnector hasnt been implemented for the given connector, just pull
+    """If the SlimConnector hasnt been implemented for the given connector, just pull
     all docs using the load_from_state and grab out the IDs.
+    
+    如果给定连接器没有实现SlimConnector，则使用load_from_state获取所有文档并提取ID。
 
     Optionally, a callback can be passed to handle the length of each document batch.
+    可选地，可以传递回调函数来处理每个文档批次的长度。
+    
+    参数:
+        runnable_connector: 可运行的连接器实例
+        callback: 索引心跳接口回调，可选
+        
+    返回:
+        文档ID集合
+    
+    异常:
+        RuntimeError: 当找不到有效的runnable_connector时抛出
     """
     all_connector_doc_ids: set[str] = set()
 
@@ -124,8 +173,16 @@ def extract_ids_from_runnable_connector(
 
 
 def celery_is_listening_to_queue(worker: Any, name: str) -> bool:
-    """Checks to see if we're listening to the named queue"""
-
+    """Checks to see if we're listening to the named queue
+    检查是否正在监听指定名称的队列
+    
+    参数:
+        worker: Celery worker实例
+        name: 队列名称
+        
+    返回:
+        是否正在监听该队列
+    """
     # how to get a list of queues this worker is listening to
     # https://stackoverflow.com/questions/29790523/how-to-determine-which-queues-a-celery-worker-is-consuming-at-runtime
     queue_names = list(worker.app.amqp.queues.consume_from.keys())
@@ -139,8 +196,17 @@ def celery_is_listening_to_queue(worker: Any, name: str) -> bool:
 def celery_is_worker_primary(worker: Any) -> bool:
     """There are multiple approaches that could be taken to determine if a celery worker
     is 'primary', as defined by us. But the way we do it is to check the hostname set
-    for the celery worker, which can be done on the
-    command line with '--hostname'."""
+    for the celery worker, which can be done on the command line with '--hostname'.
+    
+    有多种方法可以确定一个celery worker是否为'primary'。我们的方法是检查为celery worker
+    设置的主机名，这可以通过命令行的'--hostname'参数来完成。
+    
+    参数:
+        worker: Celery worker实例
+        
+    返回:
+        是否为主要worker
+    """
     hostname = worker.hostname
     if hostname.startswith("primary"):
         return True

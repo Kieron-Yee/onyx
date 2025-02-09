@@ -1,3 +1,12 @@
+"""
+这个文件包含了与Vespa同步相关的Celery任务和辅助函数。
+主要功能:
+1. 监控和管理文档元数据的同步任务
+2. 处理连接器和文档集的同步状态
+3. 管理索引和权限的同步
+4. 提供各种监控和清理功能
+"""
+
 import time
 import traceback
 from datetime import datetime
@@ -83,6 +92,7 @@ logger = setup_logger()
 
 # celery auto associates tasks created inside another task,
 # which bloats the result metadata considerably. trail=False prevents this.
+# celery会自动关联在另一个任务内创建的任务,这会大大增加结果元数据的体积。trail=False可以防止这种情况。
 @shared_task(
     name=OnyxCeleryTask.CHECK_FOR_VESPA_SYNC_TASK,
     soft_time_limit=JOB_TIMEOUT,
@@ -91,7 +101,16 @@ logger = setup_logger()
 )
 def check_for_vespa_sync_task(self: Task, *, tenant_id: str | None) -> bool | None:
     """Runs periodically to check if any document needs syncing.
-    Generates sets of tasks for Celery if syncing is needed."""
+    Generates sets of tasks for Celery if syncing is needed.
+    定期运行以检查是否有文档需要同步。如果需要同步,则为Celery生成任务集。
+    
+    参数:
+        self: Task - Celery任务实例
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        bool | None - 如果成功生成任务返回True,如果任务重叠返回None
+    """
     time_start = time.monotonic()
 
     r = get_redis_client(tenant_id=tenant_id)
@@ -103,6 +122,7 @@ def check_for_vespa_sync_task(self: Task, *, tenant_id: str | None) -> bool | No
 
     try:
         # these tasks should never overlap
+        # 这些任务永远不应该重叠
         if not lock_beat.acquire(blocking=False):
             return None
 
@@ -116,6 +136,7 @@ def check_for_vespa_sync_task(self: Task, *, tenant_id: str | None) -> bool | No
         document_set_ids: list[int] = []
         with get_session_with_tenant(tenant_id) as db_session:
             # check if any document sets are not synced
+            # 检查是否有文档集未同步
             document_set_info = fetch_document_sets(
                 user_id=None, db_session=db_session, include_outdated=True
             )
@@ -142,6 +163,8 @@ def check_for_vespa_sync_task(self: Task, *, tenant_id: str | None) -> bool | No
             except ModuleNotFoundError:
                 # Always exceptions on the MIT version, which is expected
                 # We shouldn't actually get here if the ee version check works
+                # 在MIT版本上总是会抛出异常,这是预期的
+                # 如果ee版本检查正常工作,我们实际上不应该到达这里
                 pass
             else:
                 usergroup_ids: list[int] = []
@@ -188,13 +211,28 @@ def try_generate_stale_document_sync_tasks(
     lock_beat: RedisLock,
     tenant_id: str | None,
 ) -> int | None:
+    """
+    尝试为过期的文档生成同步任务
+    
+    参数:
+        celery_app: Celery - Celery应用实例
+        db_session: Session - 数据库会话
+        r: Redis - Redis客户端
+        lock_beat: RedisLock - Redis锁
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        int | None - 生成的任务总数,如果围栏已存在则返回None
+    """
     # the fence is up, do nothing
+    # 围栏已存在,不做任何操作
     if r.exists(RedisConnectorCredentialPair.get_fence_key()):
         return None
 
     r.delete(RedisConnectorCredentialPair.get_taskset_key())  # delete the taskset
 
     # add tasks to celery and build up the task set to monitor in redis
+    # 将任务添加到celery并在redis中构建要监控的任务集
     stale_doc_count = count_documents_by_needs_sync(db_session)
     if stale_doc_count == 0:
         return None
@@ -212,6 +250,8 @@ def try_generate_stale_document_sync_tasks(
 
     # rkuo: we could technically sync all stale docs in one big pass.
     # but I feel it's more understandable to group the docs by cc_pair
+    # rkuo: 从技术上讲,我们可以在一次大的传递中同步所有过期文档。
+    # 但我觉得按cc_pair分组文档更容易理解
     total_tasks_generated = 0
     cc_pairs = get_connector_credential_pairs(db_session)
     for cc_pair in cc_pairs:
@@ -248,16 +288,33 @@ def try_generate_document_set_sync_tasks(
     lock_beat: RedisLock,
     tenant_id: str | None,
 ) -> int | None:
+    """
+    尝试为文档集生成同步任务
+    
+    参数:
+        celery_app: Celery - Celery应用实例
+        document_set_id: int - 文档集ID
+        db_session: Session - 数据库会话 
+        r: Redis - Redis客户端
+        lock_beat: RedisLock - Redis锁
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        int | None - 生成的任务数,如果任务已挂起或文档集已同步则返回None
+    """
     lock_beat.reacquire()
 
     rds = RedisDocumentSet(tenant_id, document_set_id)
 
     # don't generate document set sync tasks if tasks are still pending
+    # 如果任务仍在待处理,则不要生成文档集同步任务
     if rds.fenced:
         return None
 
     # don't generate sync tasks if we're up to date
     # race condition with the monitor/cleanup function if we use a cached result!
+    # 如果我们是最新的,则不要生成同步任务
+    # 如果使用缓存结果,则与监视器/清理功能存在竞争条件!
     document_set = get_document_set_by_id(db_session, document_set_id)
     if not document_set:
         return None
@@ -281,6 +338,9 @@ def try_generate_document_set_sync_tasks(
     # Currently we are allowing the sync to proceed with 0 tasks.
     # It's possible for sets/groups to be generated initially with no entries
     # and they still need to be marked as up to date.
+    # 目前我们允许同步以0个任务继续进行。
+    # 集合/组最初可能没有条目生成,
+    # 但它们仍然需要被标记为最新。
     # if tasks_generated == 0:
     #     return 0
 
@@ -290,6 +350,7 @@ def try_generate_document_set_sync_tasks(
     )
 
     # set this only after all tasks have been added
+    # 仅在添加所有任务后才设置此项
     rds.set_fence(tasks_generated)
     return tasks_generated
 
@@ -302,6 +363,20 @@ def try_generate_user_group_sync_tasks(
     lock_beat: RedisLock,
     tenant_id: str | None,
 ) -> int | None:
+    """
+    尝试为用户组生成同步任务
+    
+    参数:
+        celery_app: Celery - Celery应用实例
+        usergroup_id: int - 用户组ID 
+        db_session: Session - 数据库会话
+        r: Redis - Redis客户端
+        lock_beat: RedisLock - Redis锁
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        int | None - 生成的任务数,如果任务已挂起或用户组已同步则返回None
+    """
     lock_beat.reacquire()
 
     rug = RedisUserGroup(tenant_id, usergroup_id)
@@ -336,6 +411,9 @@ def try_generate_user_group_sync_tasks(
     # Currently we are allowing the sync to proceed with 0 tasks.
     # It's possible for sets/groups to be generated initially with no entries
     # and they still need to be marked as up to date.
+    # 目前我们允许同步以0个任务继续进行。
+    # 集合/组最初可能没有条目生成,
+    # 但它们仍然需要被标记为最新。
     # if tasks_generated == 0:
     #     return 0
 
@@ -345,11 +423,18 @@ def try_generate_user_group_sync_tasks(
     )
 
     # set this only after all tasks have been added
+    # 仅在添加所有任务后才设置此项
     rug.set_fence(tasks_generated)
     return tasks_generated
 
 
 def monitor_connector_taskset(r: Redis) -> None:
+    """
+    监控连接器的任务集合
+    
+    参数:
+        r: Redis - Redis客户端
+    """
     fence_value = r.get(RedisConnectorCredentialPair.get_fence_key())
     if fence_value is None:
         return
@@ -373,6 +458,15 @@ def monitor_connector_taskset(r: Redis) -> None:
 def monitor_document_set_taskset(
     tenant_id: str | None, key_bytes: bytes, r: Redis, db_session: Session
 ) -> None:
+    """
+    监控文档集的任务集合
+    
+    参数:
+        tenant_id: str | None - 租户ID
+        key_bytes: bytes - Redis键 
+        r: Redis - Redis客户端
+        db_session: Session - 数据库会话
+    """
     fence_key = key_bytes.decode("utf-8")
     document_set_id_str = RedisDocumentSet.get_id_from_fence_key(fence_key)
     if document_set_id_str is None:
@@ -401,9 +495,11 @@ def monitor_document_set_taskset(
         DocumentSet,
         get_document_set_by_id(db_session=db_session, document_set_id=document_set_id),
     )  # casting since we "know" a document set with this ID exists
+    # 由于我们"知道"存在具有此ID的文档集,所以进行类型转换
     if document_set:
         if not document_set.connector_credential_pairs:
             # if there are no connectors, then delete the document set.
+            # 如果没有连接器,则删除文档集。
             delete_document_set(document_set_row=document_set, db_session=db_session)
             task_logger.info(
                 f"Successfully deleted document set: document_set={document_set_id}"
@@ -420,6 +516,14 @@ def monitor_document_set_taskset(
 def monitor_connector_deletion_taskset(
     tenant_id: str | None, key_bytes: bytes, r: Redis
 ) -> None:
+    """
+    监控连接器删除任务集合的进度和完成状态
+    
+    参数:
+        tenant_id: str | None - 租户ID
+        key_bytes: bytes - Redis键
+        r: Redis - Redis客户端
+    """
     fence_key = key_bytes.decode("utf-8")
     cc_pair_id_str = RedisConnector.get_id_from_fence_key(fence_key)
     if cc_pair_id_str is None:
@@ -439,6 +543,7 @@ def monitor_connector_deletion_taskset(
 
     if fence_data.num_tasks is None:
         # the fence is setting up but isn't ready yet
+        # 围栏正在设置但尚未准备就绪
         return
 
     remaining = redis_connector.delete.get_remaining()
@@ -464,6 +569,8 @@ def monitor_connector_deletion_taskset(
                 # NOTE(rkuo): if this happens, documents somehow got added while
                 # deletion was in progress. Likely a bug gating off pruning and indexing
                 # work before deletion starts.
+                # 注意(rkuo): 如果发生这种情况,说明在删除过程中somehow添加了文档。
+                # 可能是在删除开始前关闭清理和索引工作的bug。
                 task_logger.warning(
                     "Connector deletion - documents still found after taskset completion. "
                     "Clearing the current deletion attempt and allowing deletion to restart: "
@@ -474,12 +581,14 @@ def monitor_connector_deletion_taskset(
 
                 # We don't want to waive off why we get into this state, but resetting
                 # our attempt and letting the deletion restart is a good way to recover
+                # 我们不想放弃为什么会进入这种状态,但重置尝试并让删除重新启动是一个很好的恢复方式
                 redis_connector.delete.reset()
                 raise RuntimeError(
                     "Connector deletion - documents still found after taskset completion"
                 )
 
             # clean up the rest of the related Postgres entities
+            # 清理其余相关的Postgres实体
             # index attempts
             delete_index_attempts(
                 db_session=db_session,
@@ -511,6 +620,7 @@ def monitor_connector_deletion_taskset(
                 credential_id=cc_pair.credential_id,
             )
             # if there are no credentials left, delete the connector
+            # 如果没有剩余的凭证,则删除连接器
             connector = fetch_connector_by_id(
                 db_session=db_session,
                 connector_id=cc_pair.connector_id,
@@ -546,6 +656,15 @@ def monitor_connector_deletion_taskset(
 def monitor_ccpair_pruning_taskset(
     tenant_id: str | None, key_bytes: bytes, r: Redis, db_session: Session
 ) -> None:
+    """
+    监控连接器凭证对的清理任务集合
+    
+    参数:
+        tenant_id: str | None - 租户ID 
+        key_bytes: bytes - Redis键
+        r: Redis - Redis客户端
+        db_session: Session - 数据库会话
+    """
     fence_key = key_bytes.decode("utf-8")
     cc_pair_id_str = RedisConnector.get_id_from_fence_key(fence_key)
     if cc_pair_id_str is None:
@@ -584,6 +703,15 @@ def monitor_ccpair_pruning_taskset(
 def monitor_ccpair_permissions_taskset(
     tenant_id: str | None, key_bytes: bytes, r: Redis, db_session: Session
 ) -> None:
+    """
+    监控连接器凭证对的权限同步任务集合
+    
+    参数:
+        tenant_id: str | None - 租户ID
+        key_bytes: bytes - Redis键
+        r: Redis - Redis客户端 
+        db_session: Session - 数据库会话
+    """
     fence_key = key_bytes.decode("utf-8")
     cc_pair_id_str = RedisConnector.get_id_from_fence_key(fence_key)
     if cc_pair_id_str is None:
@@ -623,7 +751,17 @@ def monitor_ccpair_permissions_taskset(
 def monitor_ccpair_indexing_taskset(
     tenant_id: str | None, key_bytes: bytes, r: Redis, db_session: Session
 ) -> None:
+    """
+    监控连接器凭证对的索引任务集合
+    
+    参数:
+        tenant_id: str | None - 租户ID
+        key_bytes: bytes - Redis键
+        r: Redis - Redis客户端
+        db_session: Session - 数据库会话
+    """
     # if the fence doesn't exist, there's nothing to do
+    # 如果围栏不存在则无需处理
     fence_key = key_bytes.decode("utf-8")
     composite_id = RedisConnector.get_id_from_fence_key(fence_key)
     if composite_id is None:
@@ -633,6 +771,7 @@ def monitor_ccpair_indexing_taskset(
         return
 
     # parse out metadata and initialize the helper class with it
+    # 解析元数据并用它初始化辅助类
     parts = composite_id.split("/")
     if len(parts) != 2:
         return
@@ -670,9 +809,11 @@ def monitor_ccpair_indexing_taskset(
 
     if payload.index_attempt_id is None or payload.celery_task_id is None:
         # the task is still setting up
+        # 任务仍在设置中
         return
 
     # never use any blocking methods on the result from inside a task!
+    # 永远不要从任务内部对结果使用任何阻塞方法!
     result: AsyncResult = AsyncResult(payload.celery_task_id)
 
     # inner/outer/inner double check pattern to avoid race conditions when checking for
@@ -680,6 +821,9 @@ def monitor_ccpair_indexing_taskset(
 
     # inner = get_completion / generator_complete not signaled
     # outer = result.state in READY state
+    # 内/外/内双重检查模式,用于在检查错误状态时避免竞争条件
+    # inner = get_completion / generator_complete 未发出信号
+    # outer = result.state 处于 READY 状态
     status_int = redis_connector_index.get_completion()
     if status_int is None:  # inner signal not set ... possible error
         task_state = result.state
@@ -687,10 +831,14 @@ def monitor_ccpair_indexing_taskset(
             task_state in READY_STATES
         ):  # outer signal in terminal state ... possible error
             # Now double check!
+            # 现在双重检查!
             if redis_connector_index.get_completion() is None:
                 # inner signal still not set (and cannot change when outer result_state is READY)
                 # Task is finished but generator complete isn't set.
                 # We have a problem! Worker may have crashed.
+                # 内部信号仍未设置(当外部result_state为READY时无法更改)
+                # 任务已完成但generator complete未设置。
+                # 我们有问题了!Worker可能已崩溃。
                 task_result = str(result.result)
                 task_traceback = str(result.traceback)
 
@@ -751,14 +899,23 @@ def monitor_ccpair_indexing_taskset(
 
 @shared_task(name=OnyxCeleryTask.MONITOR_VESPA_SYNC, soft_time_limit=300, bind=True)
 def monitor_vespa_sync(self: Task, tenant_id: str | None) -> bool:
-    """This is a celery beat task that monitors and finalizes metadata sync tasksets.
+    """
+    Celery beat任务,用于监控和完成元数据同步任务集。
+    扫描围栏值并获取任务集计数。如果计数为0,表示所有任务完成,需要清理。
+    
+    This is a celery beat task that monitors and finalizes metadata sync tasksets.
     It scans for fence values and then gets the counts of any associated tasksets.
     If the count is 0, that means all tasks finished and we should clean up.
 
-    This task lock timeout is CELERY_METADATA_SYNC_BEAT_LOCK_TIMEOUT seconds, so don't
-    do anything too expensive in this function!
-
-    Returns True if the task actually did work, False if it exited early to prevent overlap
+    任务锁超时时间为CELERY_METADATA_SYNC_BEAT_LOCK_TIMEOUT秒,
+    因此这个函数中不要做太耗时的操作。
+    
+    参数:
+        self: Task - Celery任务实例
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        bool - 如果任务确实完成了工作返回True,如果提前退出以避免重叠返回False
     """
     time_start = time.monotonic()
     r = get_redis_client(tenant_id=tenant_id)
@@ -770,10 +927,12 @@ def monitor_vespa_sync(self: Task, tenant_id: str | None) -> bool:
 
     try:
         # prevent overlapping tasks
+        # 防止任务重叠
         if not lock_beat.acquire(blocking=False):
             return False
 
         # print current queue lengths
+        # 打印当前队列长度
         r_celery = self.app.broker_connection().channel().client  # type: ignore
         n_celery = celery_get_queue_length("celery", r_celery)
         n_indexing = celery_get_queue_length(
@@ -813,6 +972,7 @@ def monitor_vespa_sync(self: Task, tenant_id: str | None) -> bool:
         )
 
         # scan and monitor activity to completion
+        # 扫描并监控活动直至完成
         lock_beat.reacquire()
         if r.exists(RedisConnectorCredentialPair.get_fence_key()):
             monitor_connector_taskset(r)
@@ -866,7 +1026,7 @@ def monitor_vespa_sync(self: Task, tenant_id: str | None) -> bool:
 
 @shared_task(
     name=OnyxCeleryTask.VESPA_METADATA_SYNC_TASK,
-    bind=True,
+    bind=True, 
     soft_time_limit=LIGHT_SOFT_TIME_LIMIT,
     time_limit=LIGHT_TIME_LIMIT,
     max_retries=3,
@@ -874,6 +1034,18 @@ def monitor_vespa_sync(self: Task, tenant_id: str | None) -> bool:
 def vespa_metadata_sync_task(
     self: Task, document_id: str, tenant_id: str | None
 ) -> bool:
+    """
+    同步单个文档的元数据到Vespa
+    
+    参数:
+        self: Task - Celery任务实例
+        document_id: str - 文档ID
+        tenant_id: str | None - 租户ID
+        
+    返回:
+        bool - 成功返回True,失败返回False。
+        如果遇到临时错误会重试,永久错误会返回False。
+    """
     try:
         with get_session_with_tenant(tenant_id) as db_session:
             curr_ind_name, sec_ind_name = get_both_index_names(db_session)
@@ -904,10 +1076,13 @@ def vespa_metadata_sync_task(
             )
 
             # update Vespa. OK if doc doesn't exist. Raises exception otherwise.
+            # 更新Vespa。如果文档不存在则没问题。否则抛出异常。
             chunks_affected = retry_index.update_single(document_id, fields)
 
             # update db last. Worst case = we crash right before this and
             # the sync might repeat again later
+            # 最后更新数据库。最坏的情况 = 我们在此之前崩溃,
+            # 同步稍后可能会再次重复
             mark_document_as_synced(document_id, db_session)
 
             redis_syncing_key = RedisConnectorCredentialPair.make_redis_syncing_key(
@@ -927,6 +1102,7 @@ def vespa_metadata_sync_task(
             )
 
             # only set the inner exception if it is of type Exception
+            # 仅当内部异常是Exception类型时才设置
             e_temp = ex.last_attempt.exception()
             if isinstance(e_temp, Exception):
                 e = e_temp
@@ -947,6 +1123,7 @@ def vespa_metadata_sync_task(
         )
 
         # Exponential backoff from 2^4 to 2^6 ... i.e. 16, 32, 64
+        # 指数退避从2^4到2^6 ... 即16、32、64
         countdown = 2 ** (self.request.retries + 4)
         self.retry(exc=e, countdown=countdown)
 

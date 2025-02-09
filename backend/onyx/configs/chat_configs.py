@@ -4,8 +4,10 @@ import os
 
 # Path to YAML files containing prompts and personas configurations
 # 包含提示词和角色配置的YAML文件路径
-PROMPTS_YAML = "./onyx/seeding/prompts.yaml"
-PERSONAS_YAML = "./onyx/seeding/personas.yaml"
+PROMPTS_YAML = r"D:\codes\onyx\backend/onyx/seeding/prompts.yaml"
+PERSONAS_YAML = r"D:\codes\onyx\backend/onyx/seeding/personas.yaml"
+# PROMPTS_YAML = "./onyx/seeding/prompts.yaml"
+# PERSONAS_YAML = "./onyx/seeding/personas.yaml"
 
 # Number of search results to return initially
 # 初始返回的搜索结果数量

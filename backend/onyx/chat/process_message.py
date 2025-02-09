@@ -195,6 +195,7 @@ def _handle_search_tool_response_summary(
         top_docs = chunks_or_sections_to_search_docs(response_sumary.top_sections)
 
         deduped_docs = top_docs
+        # 去重在最后一步进行,以避免过早丢弃内容而影响质量
         if dedupe_docs:
             deduped_docs, dropped_inds = dedupe_documents(top_docs)
 
@@ -342,13 +343,12 @@ def stream_chat_message_objects(
     new_msg_req: CreateChatMessageRequest,
     user: User | None,
     db_session: Session,
-    # Needed to translate persona num_chunks to tokens to the LLM
+    # 需要将persona数量chunks转换为对应LLM的token数
     default_num_chunks: float = MAX_CHUNKS_FED_TO_CHAT,
-    # For flow with search, don't include as many chunks as possible since we need to leave space
-    # for the chat history, for smaller models, we likely won't get MAX_CHUNKS_FED_TO_CHAT chunks
+    # 对于需要搜索的流程,不要包含太多chunks因为我们需要保留空间给聊天历史
+    # 对于较小的模型,我们可能无法获得 MAX_CHUNKS_FED_TO_CHAT 数量的chunks 
     max_document_percentage: float = CHAT_TARGET_CHUNK_PERCENTAGE,
-    # if specified, uses the last user message and does not create a new user message based
-    # on the `new_msg_req.message`. Currently, requires a state where the last message is a
+    # 如果指定了,则使用最后一条用户消息,而不是基于new_msg_req.message创建新的用户消息
     litellm_additional_headers: dict[str, str] | None = None,
     custom_tool_additional_headers: dict[str, str] | None = None,
     is_connected: Callable[[], bool] | None = None,
@@ -411,7 +411,7 @@ def stream_chat_message_objects(
         )
 
         if alternate_assistant_id is not None:
-            # 允许用户在聊天会话中指定临时角色(助手)
+            # 允许用户在聊天会话中使用临时助手
             # 这具有最高优先级,因为是用户指定的
             persona = get_persona_by_id(
                 alternate_assistant_id,
@@ -420,9 +420,9 @@ def stream_chat_message_objects(
                 is_for_edit=False,
             )
         elif new_msg_req.persona_override_config:
-            # 某些端点允许用户指定任意角色设置
+            # 某些端点允许用户指定任意助手设置
             # 这不应该与alternate_assistant_id冲突
-            persona = persona = create_temporary_persona(
+            persona = create_temporary_persona(
                 db_session=db_session,
                 persona_config=new_msg_req.persona_override_config,
                 user=user,
@@ -519,7 +519,7 @@ def stream_chat_message_objects(
             )
 
         elif not use_existing_user_message:
-            # 在树中正确位置创建新消息并更新父节点的子指针
+            # 在树中的正确位置创建新消息并更新父节点的子指针
             # 在验证聊天消息链之前不要提交
             user_message = create_new_chat_message(
                 chat_session_id=chat_session_id,
@@ -528,11 +528,11 @@ def stream_chat_message_objects(
                 message=message_text,
                 token_count=len(llm_tokenizer_encode_func(message_text)),
                 message_type=MessageType.USER,
-                files=None,  # Need to attach later for optimization to only load files once in parallel
+                files=None,  # 需要稍后附加以优化并行加载文件
                 db_session=db_session,
                 commit=False,
             )
-            # re-create linear history of messages
+            # 重新创建消息的线性历史记录
             final_msg, history_msgs = create_chat_chain(
                 chat_session_id=chat_session_id, db_session=db_session
             )
@@ -545,7 +545,7 @@ def stream_chat_message_objects(
 
             # 注意:不要提交用户消息 - 它将在助手消息成功生成时提交
         else:
-            # re-create linear history of messages
+            # 重新创建消息的线性历史记录
             final_msg, history_msgs = create_chat_chain(
                 chat_session_id=chat_session_id, db_session=db_session
             )
@@ -564,15 +564,14 @@ def stream_chat_message_objects(
                         f"existing assistant message id: {existing_assistant_message_id}"
                     )
 
-        # Disable Query Rephrasing for the first message
-        # This leads to a better first response since the LLM rephrasing the question
-        # leads to worst search quality
+        # 禁用第一条消息的查询重述
+        # 因为LLM重述问题会导致搜索质量下降,所以这样可以得到更好的首次响应
         if not history_msgs:
             new_msg_req.query_override = (
                 new_msg_req.query_override or new_msg_req.message
             )
 
-        # load all files needed for this chat chain in memory
+        # 在内存中加载此聊天链所需的所有文件
         files = load_all_chat_files(
             history_msgs, new_msg_req.file_descriptors, db_session
         )
@@ -603,8 +602,8 @@ def stream_chat_message_objects(
                 enforce_chat_session_id_for_search_docs=enforce_chat_session_id_for_search_docs,
             )
 
-            # Generates full documents currently
-            # May extend to use sections instead in the future
+            # 生成当前是完整文档
+            # 未来可能扩展为使用sections
             selected_sections = inference_sections_from_ids(
                 doc_identifiers=identifier_tuples,
                 document_index=document_index,
@@ -657,13 +656,11 @@ def stream_chat_message_objects(
         )
 
         # Cannot determine these without the LLM step or breaking out early
+        # 如果我们使用现有的助手消息,这只是一个更新操作,在这种情况下父消息应该是最新消息的父消息
+        # 如果我们创建新的助手消息,那么父消息应该是最新消息(最新用户消息)
         partial_response = partial(
             create_new_chat_message,
             chat_session_id=chat_session_id,
-            # if we're using an existing assistant message, then this will just be an
-            # update operation, in which case the parent should be the parent of
-            # the latest. If we're creating a new assistant message, then the parent
-            # should be the latest message (latest user message)
             parent_message=(
                 final_msg if existing_assistant_message_id is None else parent_message
             ),
@@ -753,7 +750,7 @@ def stream_chat_message_objects(
         for tool_list in tool_dict.values():
             tools.extend(tool_list)
 
-        # LLM prompt building, response capturing, etc.
+        # LLM提示词构建,响应捕获等
         answer = Answer(
             is_connected=is_connected,
             question=final_msg.message,
@@ -781,7 +778,7 @@ def stream_chat_message_objects(
 
         reference_db_search_docs = None
         qa_docs_response = None
-        # 任何与AI消息相关的文件,例如dall-e生成的图片
+        # 与AI消息相关的任何文件,例如dall-e生成的图片
         ai_message_files = []
         dropped_indices = None
         tool_result = None
@@ -900,9 +897,9 @@ def stream_chat_message_objects(
                 if isinstance(packet, ToolCallFinalResult):
                     tool_result = packet
                 yield cast(ChatPacket, packet)
-        logger.debug("Reached end of stream")
+        logger.debug("已到达流的末尾")
     except ValueError as e:
-        logger.exception("Failed to process chat message.")
+        logger.exception("处理聊天消息失败.")
 
         error_msg = str(e)
         yield StreamingError(error=error_msg)
@@ -910,7 +907,7 @@ def stream_chat_message_objects(
         return
 
     except Exception as e:
-        logger.exception("Failed to process chat message.")
+        logger.exception("处理聊天消息失败.")
 
         error_msg = str(e)
         stack_trace = traceback.format_exc()
@@ -923,9 +920,9 @@ def stream_chat_message_objects(
         db_session.rollback()
         return
 
-    # Post-LLM answer processing
+    # LLM回答后的处理
     try:
-        logger.debug("Post-LLM answer processing")
+        logger.debug("正在进行LLM回答的后处理")
         message_specific_citations: MessageSpecificCitations | None = None
         if reference_db_search_docs:
             message_specific_citations = _translate_citations(
@@ -935,7 +932,7 @@ def stream_chat_message_objects(
             if not answer.is_cancelled():
                 yield AllCitations(citations=answer.citations)
 
-        # Saving Gen AI answer and responding with message info
+        # 保存生成AI的回答并返回消息信息
         tool_name_to_tool_id: dict[str, int] = {}
         for tool_id, tool_list in tool_dict.items():
             for tool in tool_list:
@@ -967,8 +964,8 @@ def stream_chat_message_objects(
             ),
         )
 
-        logger.debug("Committing messages")
-        db_session.commit()  # actually save user / assistant message
+        logger.debug("正在提交消息")
+        db_session.commit()  # 实际保存用户/助手消息
 
         msg_detail_response = translate_db_message_to_chat_message_detail(
             gen_ai_response_message
@@ -979,8 +976,8 @@ def stream_chat_message_objects(
         error_msg = str(e)
         logger.exception(error_msg)
 
-        # 前端将擦除任何答案并显示这个
-        yield StreamingError(error="Failed to parse LLM output")
+        # 前端将擦除任何答案并显示这个错误
+        yield StreamingError(error="解析LLM输出失败")
 
 
 @log_generator_function_time()

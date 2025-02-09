@@ -197,7 +197,7 @@ def user_needs_to_be_verified() -> bool:
     返回:
     - bool: 是否需要验证
     """
-    if AUTH_TYPE == AuthType.BASIC或AUTH_TYPE == AuthType.CLOUD:
+    if AUTH_TYPE == AuthType.BASIC or AUTH_TYPE == AuthType.CLOUD:
         return REQUIRE_EMAIL_VERIFICATION
 
     # 对于其他认证类型,如果用户已通过认证,则认为用户已通过外部身份提供商验证

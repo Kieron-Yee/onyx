@@ -1,3 +1,11 @@
+"""
+此文件实现了外部用户组同步的 Celery 任务功能。
+主要功能包括：
+1. 检查并触发外部用户组的同步
+2. 管理同步任务的创建和执行
+3. 处理外部用户组数据的同步逻辑
+"""
+
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -44,32 +52,44 @@ from onyx.utils.logger import setup_logger
 logger = setup_logger()
 
 
+# 外部组更新的最大重试次数
 EXTERNAL_GROUPS_UPDATE_MAX_RETRIES = 3
 
-
-# 5 seconds more than RetryDocumentIndex STOP_AFTER+MAX_WAIT
+# 软时间限制比 RetryDocumentIndex STOP_AFTER+MAX_WAIT 多5秒
+# Soft time limit is 5 seconds more than RetryDocumentIndex STOP_AFTER+MAX_WAIT
 LIGHT_SOFT_TIME_LIMIT = 105
 LIGHT_TIME_LIMIT = LIGHT_SOFT_TIME_LIMIT + 15
 
 
 def _is_external_group_sync_due(cc_pair: ConnectorCredentialPair) -> bool:
-    """Returns boolean indicating if external group sync is due."""
-
+    """判断是否需要进行外部组同步。
+    Returns boolean indicating if external group sync is due.
+    
+    参数:
+        cc_pair: 连接器凭证对
+    返回:
+        bool: 如果需要同步返回True，否则返回False
+    """
+    
+    # 如果访问类型不是同步类型，则不进行同步
     if cc_pair.access_type != AccessType.SYNC:
         return False
 
+    # 如果不是活动状态，跳过外部组同步
     # skip external group sync if not active
     if cc_pair.status != ConnectorCredentialPairStatus.ACTIVE:
         return False
 
+    # 如果状态是正在删除，则不进行同步
     if cc_pair.status == ConnectorCredentialPairStatus.DELETING:
         return False
 
+    # 如果连接器没有组同步函数，我们不运行同步
     # If there is not group sync function for the connector, we don't run the sync
-    # This is fine because all sources dont necessarily have a concept of groups
     if not GROUP_PERMISSIONS_FUNC_MAP.get(cc_pair.connector.source):
         return False
 
+    # 如果上次同步时间为空，表示从未运行过，所以我们运行同步
     # If the last sync is None, it has never been run so we run the sync
     last_ext_group_sync = cc_pair.last_time_external_group_sync
     if last_ext_group_sync is None:
@@ -77,10 +97,12 @@ def _is_external_group_sync_due(cc_pair: ConnectorCredentialPair) -> bool:
 
     source_sync_period = EXTERNAL_GROUP_SYNC_PERIODS.get(cc_pair.connector.source)
 
-    # If EXTERNAL_GROUP_SYNC_PERIODS is None, we always run the sync.
+    # 如果EXTERNAL_GROUP_SYNC_PERIODS为空，我们始终运行同步
+    # If EXTERNAL_GROUP_SYNC_PERIODS is None, we always run the sync
     if not source_sync_period:
         return True
 
+    # 如果距离上次同步时间超过了完整获取周期，我们运行同步
     # If the last sync is greater than the full fetch period, we run the sync
     next_sync = last_ext_group_sync + timedelta(seconds=source_sync_period)
     if datetime.now(timezone.utc) >= next_sync:
@@ -95,6 +117,15 @@ def _is_external_group_sync_due(cc_pair: ConnectorCredentialPair) -> bool:
     bind=True,
 )
 def check_for_external_group_sync(self: Task, *, tenant_id: str | None) -> bool | None:
+    """检查并执行外部组同步任务。
+    
+    参数:
+        self: Celery Task实例
+        tenant_id: 租户ID
+    
+    返回:
+        bool | None: 成功完成返回True，任务被锁定时返回None
+    """
     r = get_redis_client(tenant_id=tenant_id)
 
     lock_beat: RedisLock = r.lock(
@@ -103,6 +134,7 @@ def check_for_external_group_sync(self: Task, *, tenant_id: str | None) -> bool 
     )
 
     try:
+        # 这些任务不应重叠
         # these tasks should never overlap
         if not lock_beat.acquire(blocking=False):
             return None
@@ -111,13 +143,16 @@ def check_for_external_group_sync(self: Task, *, tenant_id: str | None) -> bool 
         with get_session_with_tenant(tenant_id) as db_session:
             cc_pairs = get_all_auto_sync_cc_pairs(db_session)
 
+            # 我们只想同步 GROUP_PERMISSIONS_IS_CC_PAIR_AGNOSTIC 中每种源类型的一个 cc_pair
             # We only want to sync one cc_pair per source type in
             # GROUP_PERMISSIONS_IS_CC_PAIR_AGNOSTIC
             for source in GROUP_PERMISSIONS_IS_CC_PAIR_AGNOSTIC:
+                # 这些按 cc_pair id 排序，所以第一个是我们想要的
                 # These are ordered by cc_pair id so the first one is the one we want
                 cc_pairs_to_dedupe = get_cc_pairs_by_source(
                     db_session, source, only_sync=True
                 )
+                # 我们只想同步 GROUP_PERMISSIONS_IS_CC_PAIR_AGNOSTIC 中每种源类型的一个 cc_pair，所以在这里去重
                 # We only want to sync one cc_pair per source type
                 # in GROUP_PERMISSIONS_IS_CC_PAIR_AGNOSTIC so we dedupe here
                 for cc_pair_to_remove in cc_pairs_to_dedupe[1:]:
@@ -158,8 +193,17 @@ def try_creating_external_group_sync_task(
     r: Redis,
     tenant_id: str | None,
 ) -> int | None:
-    """Returns an int if syncing is needed. The int represents the number of sync tasks generated.
-    Returns None if no syncing is required."""
+    """尝试创建外部组同步任务。
+    
+    参数:
+        app: Celery应用实例
+        cc_pair_id: 连接器凭证对ID
+        r: Redis客户端实例
+        tenant_id: 租户ID
+    
+    返回:
+        int | None: 成功创建任务返回1，无需同步或创建失败返回None
+    """
     redis_connector = RedisConnector(tenant_id, cc_pair_id)
 
     LOCK_TIMEOUT = 30
@@ -174,6 +218,7 @@ def try_creating_external_group_sync_task(
         return None
 
     try:
+        # 如果上一个同步仍在运行，则不启动新同步
         # Dont kick off a new sync if the previous one is still running
         if redis_connector.external_group_sync.fenced:
             return None
@@ -226,11 +271,18 @@ def connector_external_group_sync_generator_task(
     cc_pair_id: int,
     tenant_id: str | None,
 ) -> None:
+    """执行连接器的外部组同步生成任务。
+    
+    此任务负责：
+    1. 获取外部用户组数据
+    2. 更新数据库中的用户组关系
+    3. 处理同步状态的更新
+    
+    参数:
+        self: Celery Task实例
+        cc_pair_id: 连接器凭证对ID
+        tenant_id: 租户ID
     """
-    Permission sync task that handles external group syncing for a given connector credential pair
-    This task assumes that the task has already been properly fenced
-    """
-
     redis_connector = RedisConnector(tenant_id, cc_pair_id)
 
     r = get_redis_client(tenant_id=tenant_id)
@@ -294,6 +346,7 @@ def connector_external_group_sync_generator_task(
         redis_connector.external_group_sync.taskset_clear()
         raise e
     finally:
+        # 我们总是希望在任务完成或失败后清除围栏，以免卡住
         # we always want to clear the fence after the task is done or failed so it doesn't get stuck
         redis_connector.external_group_sync.set_fence(None)
         if lock.owned():

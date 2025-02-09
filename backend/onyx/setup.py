@@ -1,3 +1,12 @@
+"""
+这个文件是Onyx系统的setup模块，主要负责：
+1. 系统初始化设置
+2. 数据库配置和初始化
+3. 搜索服务(Vespa)的设置
+4. LLM提供者配置
+5. 内置工具和persona的加载
+"""
+
 import time
 
 from sqlalchemy.orm import Session
@@ -64,10 +73,19 @@ def setup_onyx(
     db_session: Session, tenant_id: str | None, cohere_enabled: bool = False
 ) -> None:
     """
-    Setup Onyx for a particular tenant. In the Single Tenant case, it will set it up for the default schema
-    on server startup. In the MT case, it will be called when the tenant is created.
-
-    The Tenant Service calls the tenants/create endpoint which runs this.
+    为特定租户设置Onyx系统。
+    
+    参数:
+        db_session: 数据库会话对象
+        tenant_id: 租户ID，单租户模式下为None
+        cohere_enabled: 是否启用cohere功能
+        
+    功能:
+    - 检查和设置索引
+    - 配置搜索设置
+    - 初始化文档索引
+    - 设置LLM提供者
+    - 加载必要的NLP模型
     """
     # 为特定租户设置Onyx。在单租户情况下，它将在服务器启动时为默认模式设置。在多租户情况下，它将在创建租户时调用。
     # 租户服务调用tenants/create端点来运行此操作。
@@ -75,7 +93,6 @@ def setup_onyx(
     search_settings = get_current_search_settings(db_session)
     secondary_search_settings = get_secondary_search_settings(db_session)
 
-    # Break bad state for thrashing indexes
     # 解决索引抖动的错误状态
     if secondary_search_settings and DISABLE_INDEX_UPDATE_ON_SWAP:
         expire_index_attempts(
@@ -85,7 +102,6 @@ def setup_onyx(
         for cc_pair in get_connector_credential_pairs(db_session):
             resync_cc_pair(cc_pair, db_session=db_session)
 
-    # Expire all old embedding models indexing attempts, technically redundant
     # 过期所有旧的嵌入模型索引尝试，技术上是多余的
     cancel_indexing_attempts_past_model(db_session)
 
@@ -119,20 +135,15 @@ def setup_onyx(
     # 验证查询预处理（NLTK）数据是否已下载
     download_nltk_data()
 
-    # setup Postgres with default credential, llm providers, etc.
     # 使用默认凭证、llm提供程序等设置Postgres
     setup_postgres(db_session)
 
     translate_saved_search_settings(db_session)
 
-    # Does the user need to trigger a reindexing to bring the document index
-    # into a good state, marked in the kv store
     # 用户是否需要触发重新索引以使文档索引处于良好状态，在kv存储中标记
     if not MULTI_TENANT:
         mark_reindex_flag(db_session)
 
-    # Ensure Vespa is setup correctly, this step is relatively near the end because Vespa
-    # takes a bit of time to start up
     # 确保Vespa设置正确，这一步相对接近尾声，因为Vespa启动需要一些时间
     logger.notice("Verifying Document Index(s) is/are available.")
     document_index = get_default_document_index(
@@ -164,7 +175,6 @@ def setup_onyx(
             ),
         )
 
-    # update multipass indexing setting based on GPU availability
     # 根据GPU可用性更新多通道索引设置
     update_default_multipass_indexing(db_session)
 
@@ -172,16 +182,25 @@ def setup_onyx(
 
 
 def translate_saved_search_settings(db_session: Session) -> None:
+    """
+    将KV存储中的搜索设置转换并更新到数据库中。
+    
+    参数:
+        db_session: 数据库会话对象
+        
+    功能:
+    - 从KV存储加载搜索设置
+    - 更新当前和次要搜索设置
+    - 清理KV存储中的旧设置
+    """
     kv_store = get_kv_store()
 
     try:
         search_settings_dict = kv_store.load(KV_SEARCH_SETTINGS)
         if isinstance(search_settings_dict, dict):
-            # Update current search settings
             # 更新当前搜索设置
             current_settings = get_current_search_settings(db_session)
 
-            # Update non-preserved fields
             # 更新非保留字段
             if current_settings:
                 current_settings_dict = SavedSearchSettings.from_db_model(
@@ -193,7 +212,6 @@ def translate_saved_search_settings(db_session: Session) -> None:
                 )
                 update_current_search_settings(db_session, new_current_settings)
 
-            # Update secondary search settings
             # 更新次要搜索设置
             secondary_settings = get_secondary_search_settings(db_session)
             if secondary_settings:
@@ -208,7 +226,6 @@ def translate_saved_search_settings(db_session: Session) -> None:
                     db_session,
                     new_secondary_settings,
                 )
-            # Delete the KV store entry after successful update
             # 成功更新后删除KV存储条目
             kv_store.delete(KV_SEARCH_SETTINGS)
             logger.notice("Search settings updated and KV store entry deleted.")
@@ -222,6 +239,16 @@ def translate_saved_search_settings(db_session: Session) -> None:
 
 
 def mark_reindex_flag(db_session: Session) -> None:
+    """
+    设置重新索引标志。
+    
+    参数:
+        db_session: 数据库会话对象
+        
+    功能:
+    - 检查是否需要重新索引
+    - 在KV存储中设置重新索引标志
+    """
     kv_store = get_kv_store()
     try:
         value = kv_store.load(KV_REINDEX_KEY)
@@ -229,13 +256,9 @@ def mark_reindex_flag(db_session: Session) -> None:
         # 重新索引标志的值
         return
     except KvKeyNotFoundError:
-        # Only need to update the flag if it hasn't been set
         # 仅在未设置标志时才需要更新
         pass
 
-    # If their first deployment is after the changes, it will
-    # enable this when the other changes go in, need to avoid
-    # this being set to False, then the user indexes things on the old version
     # 如果他们的首次部署在更改之后，它将在其他更改生效时启用此功能，需要避免将其设置为False，然后用户在旧版本上索引内容
     docs_exist = check_docs_exist(db_session)
     connectors_exist = check_connectors_exist(db_session)
@@ -251,7 +274,18 @@ def setup_vespa(
     secondary_index_setting: IndexingSetting | None,
     num_attempts: int = VESPA_NUM_ATTEMPTS_ON_STARTUP,
 ) -> bool:
-    # Vespa startup is a bit slow, so give it a few seconds
+    """
+    设置和初始化Vespa搜索引擎。
+    
+    参数:
+        document_index: 文档索引对象
+        index_setting: 主索引设置
+        secondary_index_setting: 次要索引设置
+        num_attempts: 尝试连接次数
+        
+    返回:
+        bool: 设置是否成功
+    """
     # Vespa启动有点慢，所以给它几秒钟
     WAIT_SECONDS = 5
     for x in range(num_attempts):
@@ -283,6 +317,18 @@ def setup_vespa(
 
 
 def setup_postgres(db_session: Session) -> None:
+    """
+    设置和初始化PostgreSQL数据库。
+    
+    参数:
+        db_session: 数据库会话对象
+    
+    功能:
+    - 创建默认连接器和凭证
+    - 加载内置工具
+    - 加载默认提示和角色
+    - 设置默认的LLM提供者(仅开发环境)
+    """
     logger.notice("Verifying default connector/credential exist.")
     # 验证默认连接器/凭证是否存在
     create_initial_public_credential(db_session)
@@ -302,7 +348,6 @@ def setup_postgres(db_session: Session) -> None:
     auto_add_search_tool_to_personas(db_session)
 
     if GEN_AI_API_KEY and fetch_default_provider(db_session) is None:
-        # Only for dev flows
         # 仅用于开发流程
         logger.notice("Setting up default OpenAI LLM for dev.")
         # 为开发设置默认的OpenAI LLM
@@ -329,6 +374,18 @@ def setup_postgres(db_session: Session) -> None:
 
 
 def update_default_multipass_indexing(db_session: Session) -> None:
+    """
+    根据GPU可用性更新多通道索引设置。
+    
+    参数:
+        db_session: 数据库会话对象
+        
+    功能:
+    - 检查现有文档和连接器
+    - 检测GPU可用性
+    - 更新多通道索引设置
+    - 更新系统GPU设置
+    """
     docs_exist = check_docs_exist(db_session)
     connectors_exist = check_connectors_exist(db_session)
     logger.debug(f"Docs exist: {docs_exist}, Connectors exist: {connectors_exist}")
@@ -348,14 +405,12 @@ def update_default_multipass_indexing(db_session: Session) -> None:
         logger.notice(f"Updating multipass indexing setting to: {gpu_available}")
         # 将多通道索引设置更新为
         updated_settings = SavedSearchSettings.from_db_model(current_settings)
-        # Enable multipass indexing if GPU is available or if using a cloud provider
         # 如果GPU可用或使用云提供商，则启用多通道索引
         updated_settings.multipass_indexing = (
             gpu_available or current_settings.cloud_provider is not None
         )
         update_current_search_settings(db_session, updated_settings)
 
-        # Update settings with GPU availability
         # 使用GPU可用性更新设置
         settings = load_settings()
         settings.gpu_enabled = gpu_available
@@ -371,14 +426,33 @@ def update_default_multipass_indexing(db_session: Session) -> None:
 
 
 def setup_multitenant_onyx() -> None:
-    # For Managed Vespa, the schema is sent over via the Vespa Console manually.
+    """
+    设置多租户版本的Onyx系统。
+    
+    功能:
+    - 对于非托管Vespa，设置多租户索引
+    - 托管Vespa通过控制台手动配置
+    """
     # 对于托管Vespa，架构通过Vespa控制台手动发送。
     if not MANAGED_VESPA:
         setup_vespa_multitenant(SUPPORTED_EMBEDDING_MODELS)
 
 
 def setup_vespa_multitenant(supported_indices: list[SupportedEmbeddingModel]) -> bool:
-    # This is for local testing
+    """
+    为多租户环境设置Vespa搜索引擎。
+    
+    参数:
+        supported_indices: 支持的嵌入模型列表
+        
+    返回:
+        bool: 设置是否成功
+        
+    功能:
+    - 注册多租户索引
+    - 设置索引维度
+    - 重试机制确保服务可用
+    """
     # 这是用于本地测试
     WAIT_SECONDS = 5
     VESPA_ATTEMPTS = 5

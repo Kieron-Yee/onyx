@@ -1,3 +1,12 @@
+"""
+该文件实现了文档清理(pruning)相关的Celery任务。
+主要功能包括:
+- 检查需要清理的文档
+- 生成清理任务
+- 执行文档清理操作
+- 管理清理任务的调度和执行
+"""
+
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -42,31 +51,46 @@ logger = setup_logger()
 
 def _is_pruning_due(cc_pair: ConnectorCredentialPair) -> bool:
     """Returns boolean indicating if pruning is due.
+    返回布尔值表示是否应该进行清理。
 
     Next pruning time is calculated as a delta from the last successful prune, or the
     last successful indexing if pruning has never succeeded.
+    下次清理时间是从上次成功清理计算得出的时间间隔，如果从未成功清理过则从上次成功索引时间计算。
 
     TODO(rkuo): consider whether we should allow pruning to be immediately rescheduled
     if pruning fails (which is what it does now). A backoff could be reasonable.
+    待办(rkuo): 考虑在清理失败时是否应该允许立即重新调度（目前的做法），使用退避策略可能更合理。
+    
+    参数:
+        cc_pair: ConnectorCredentialPair 连接器凭证对实例
+    
+    返回:
+        bool: 是否应该执行清理操作
     """
 
     # skip pruning if no prune frequency is set
+    # 如果未设置清理频率则跳过清理
     # pruning can still be forced via the API which will run a pruning task directly
+    # 仍可以通过API强制执行清理任务
     if not cc_pair.connector.prune_freq:
         return False
 
     # skip pruning if not active
+    # 如果未激活则跳过清理
     if cc_pair.status != ConnectorCredentialPairStatus.ACTIVE:
         return False
 
     # skip pruning if the next scheduled prune time hasn't been reached yet
+    # 如果还未到达下次预定的清理时间则跳过清理
     last_pruned = cc_pair.last_pruned
     if not last_pruned:
         if not cc_pair.last_successful_index_time:
             # if we've never indexed, we can't prune
+            # 如果从未索引过，则无法清理
             return False
 
         # if never pruned, use the last time the connector indexed successfully
+        # 如果从未清理过，使用连接器最后一次成功索引的时间
         last_pruned = cc_pair.last_successful_index_time
 
     next_prune = last_pruned + timedelta(seconds=cc_pair.connector.prune_freq)
@@ -82,6 +106,17 @@ def _is_pruning_due(cc_pair: ConnectorCredentialPair) -> bool:
     bind=True,
 )
 def check_for_pruning(self: Task, *, tenant_id: str | None) -> bool | None:
+    """
+    检查是否需要执行清理操作的Celery任务。
+    遍历所有连接器凭证对，检查是否需要清理，并创建相应的清理任务。
+
+    参数:
+        self: Task celery任务实例
+        tenant_id: 租户ID
+    
+    返回:
+        bool | None: 任务执行结果
+    """
     r = get_redis_client(tenant_id=tenant_id)
 
     lock_beat: RedisLock = r.lock(
@@ -91,6 +126,7 @@ def check_for_pruning(self: Task, *, tenant_id: str | None) -> bool | None:
 
     try:
         # these tasks should never overlap
+        # 这些任务不应该重叠执行
         if not lock_beat.acquire(blocking=False):
             return None
 
@@ -139,9 +175,21 @@ def try_creating_prune_generator_task(
 ) -> int | None:
     """Checks for any conditions that should block the pruning generator task from being
     created, then creates the task.
+    检查是否存在阻止创建清理生成器任务的条件，然后创建任务。
 
     Does not check for scheduling related conditions as this function
     is used to trigger prunes immediately, e.g. via the web ui.
+    不检查调度相关的条件，因为此函数用于立即触发清理，例如通过Web UI。
+    
+    参数:
+        celery_app: Celery应用实例
+        cc_pair: 连接器凭证对
+        db_session: 数据库会话
+        r: Redis客户端实例
+        tenant_id: 租户ID
+    
+    返回:
+        int | None: 成功创建任务返回1，否则返回None
     """
 
     redis_connector = RedisConnector(tenant_id, cc_pair.id)
@@ -155,6 +203,7 @@ def try_creating_prune_generator_task(
 
     # we need to serialize starting pruning since it can be triggered either via
     # celery beat or manually (API call)
+    # 需要序列化启动清理，因为它可以通过celery beat或手动(API调用)触发
     lock = r.lock(
         DANSWER_REDIS_FUNCTION_LOCK_PREFIX + "try_creating_prune_generator_task",
         timeout=LOCK_TIMEOUT,
@@ -166,14 +215,17 @@ def try_creating_prune_generator_task(
 
     try:
         # skip pruning if already pruning
+        # 如果正在清理则跳过
         if redis_connector.prune.fenced:
             return None
 
         # skip pruning if the cc_pair is deleting
+        # 如果cc_pair正在删除则跳过清理
         if redis_connector.delete.fenced:
             return None
 
         # skip pruning if doc permissions sync is running
+        # 如果文档权限同步正在运行则跳过清理
         if redis_connector.permissions.fenced:
             return None
 
@@ -182,6 +234,7 @@ def try_creating_prune_generator_task(
             return None
 
         # add a long running generator task to the queue
+        # 向队列添加一个长期运行的生成器任务
         redis_connector.prune.generator_clear()
         redis_connector.prune.taskset_clear()
 
@@ -201,6 +254,7 @@ def try_creating_prune_generator_task(
         )
 
         # set this only after all tasks have been added
+        # 仅在添加所有任务后设置此项
         redis_connector.prune.set_fence(True)
     except Exception:
         task_logger.exception(f"Unexpected exception: cc_pair={cc_pair.id}")
@@ -229,7 +283,20 @@ def connector_pruning_generator_task(
 ) -> None:
     """connector pruning task. For a cc pair, this task pulls all document IDs from the source
     and compares those IDs to locally stored documents and deletes all locally stored IDs missing
-    from the most recently pulled document ID list"""
+    from the most recently pulled document ID list
+    连接器清理任务。对于一个连接器凭证对，该任务从源获取所有文档ID，
+    并将这些ID与本地存储的文档进行比较，删除最近拉取的文档ID列表中不存在的所有本地存储ID。
+
+    参数:
+        self: Task celery任务实例
+        cc_pair_id: 连接器凭证对ID
+        connector_id: 连接器ID
+        credential_id: 凭证ID
+        tenant_id: 租户ID
+    
+    返回:
+        None
+    """
 
     pruning_ctx_dict = pruning_ctx.get()
     pruning_ctx_dict["cc_pair_id"] = cc_pair_id
@@ -244,6 +311,7 @@ def connector_pruning_generator_task(
 
     # set thread_local=False since we don't control what thread the indexing/pruning
     # might run our callback with
+    # 设置thread_local=False，因为我们无法控制索引/清理可能在哪个线程中运行我们的回调
     lock: RedisLock = r.lock(
         OnyxRedisLocks.PRUNING_LOCK_PREFIX + f"_{redis_connector.id}",
         timeout=CELERY_PRUNING_LOCK_TIMEOUT,
@@ -293,11 +361,13 @@ def connector_pruning_generator_task(
             )
 
             # a list of docs in the source
+            # 源中的文档列表
             all_connector_doc_ids: set[str] = extract_ids_from_runnable_connector(
                 runnable_connector, callback
             )
 
             # a list of docs in our local index
+            # 本地索引中的文档列表
             all_indexed_document_ids = {
                 doc.id
                 for doc in get_documents_for_connector_credential_pair(
@@ -308,6 +378,7 @@ def connector_pruning_generator_task(
             }
 
             # generate list of docs to remove (no longer in the source)
+            # 生成要删除的文档列表(在源中不再存在)
             doc_ids_to_remove = list(all_indexed_document_ids - all_connector_doc_ids)
 
             task_logger.info(

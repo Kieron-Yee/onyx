@@ -407,6 +407,8 @@ app = fetch_versioned_implementation(module="onyx.main", attribute="get_applicat
 
 
 if __name__ == "__main__":
+    import os
+    os.chdir(r'D:\\codes\\onyx\\backend\\onyx')
     logger.notice(
         f"Starting Onyx Backend version {__version__} on http://{APP_HOST}:{str(APP_PORT)}/"
     )

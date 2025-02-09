@@ -19,6 +19,7 @@ def _run_command(command: str, stream_output: bool = False) -> tuple[str, str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding='utf-8',
         bufsize=1,
     )
 

@@ -1,3 +1,8 @@
+"""
+此模块用于定义 Celery 定时任务的调度配置。
+包含了各种周期性任务的调度设置，如同步检查、清理和监控任务等。
+"""
+
 from datetime import timedelta
 from typing import Any
 
@@ -8,11 +13,16 @@ from onyx.configs.constants import OnyxCeleryTask
 # choosing 15 minutes because it roughly gives us enough time to process many tasks
 # we might be able to reduce this greatly if we can run a unified
 # loop across all tenants rather than tasks per tenant
+# 选择15分钟是因为这大致给我们足够的时间来处理许多任务
+# 如果我们能够在所有租户之间运行统一的循环而不是每个租户的任务，我们可能可以大大减少这个时间
 
-BEAT_EXPIRES_DEFAULT = 15 * 60  # 15 minutes (in seconds)
+BEAT_EXPIRES_DEFAULT = 15 * 60  # 15 minutes (in seconds) # 15分钟（以秒为单位）
 
 # we set expires because it isn't necessary to queue up these tasks
 # it's only important that they run relatively regularly
+# 我们设置过期时间是因为没有必要将这些任务排队
+# 重要的是它们能相对定期地运行
+
 tasks_to_schedule = [
     {
         "name": "check-for-vespa-sync",
@@ -89,12 +99,13 @@ tasks_to_schedule = [
 ]
 
 # Only add the LLM model update task if the API URL is configured
+# 仅在配置了API URL的情况下添加LLM模型更新任务
 if LLM_MODEL_UPDATE_API_URL:
     tasks_to_schedule.append(
         {
             "name": "check-for-llm-model-update",
             "task": OnyxCeleryTask.CHECK_FOR_LLM_MODEL_UPDATE,
-            "schedule": timedelta(hours=1),  # Check every hour
+            "schedule": timedelta(hours=1),  # Check every hour # 每小时检查一次
             "options": {
                 "priority": OnyxCeleryPriority.LOW,
                 "expires": BEAT_EXPIRES_DEFAULT,
@@ -104,4 +115,11 @@ if LLM_MODEL_UPDATE_API_URL:
 
 
 def get_tasks_to_schedule() -> list[dict[str, Any]]:
+    """
+    获取需要调度的任务列表。
+    
+    返回值:
+        list[dict[str, Any]]: 包含所有需要调度的任务配置的列表，
+                             每个任务配置包含名称、任务类型、调度间隔和选项等信息。
+    """
     return tasks_to_schedule
